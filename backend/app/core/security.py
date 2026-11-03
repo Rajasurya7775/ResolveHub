@@ -18,14 +18,13 @@ password_context = CryptContext(
 )
 
 
+import bcrypt
+
 def hash_password(password: str) -> str:
-    """Return a secure hash of the supplied password."""
-    return password_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8")[:72], bcrypt.gensalt()).decode("utf-8")
 
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its stored hash."""
-    return password_context.verify(plain_password, hashed_password)
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8")[:72], hashed.encode("utf-8"))
 
 
 def create_access_token(
