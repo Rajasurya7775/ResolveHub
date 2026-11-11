@@ -1,12 +1,17 @@
-.venv/
-**/.venv/
+# Environment
+.env
+venv/
+
+# Python cache
 __pycache__/
 *.py[cod]
-.env
-.env.*
-!.env.example
-*.db
-*.sqlite
-*.sqlite3
 .pytest_cache/
-.vscode/
+
+# Seed files
+seed_*.py
+
+# Test files
+test_*.py
+
+# Logs
+*.log

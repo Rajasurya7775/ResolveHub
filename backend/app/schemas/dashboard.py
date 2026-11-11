@@ -1,15 +1,13 @@
+
 from pydantic import BaseModel
 
 
 class DashboardSummary(BaseModel):
-    total_issues: int
-    in_progress: int
-    resolved: int
-    hold: int
-    p1_open: int
-    my_issues: int
-    created_this_shift: int
-    current_shift: str
+    total_logged_issues: int
+    active_issues: int
+    resolved_issues: int
+    in_progress_issues: int
+    open_issues: int
 
 
 class CurrentShiftResponse(BaseModel):

@@ -1,3 +1,4 @@
+
 from enum import StrEnum
 
 
@@ -14,6 +15,7 @@ class IssuePriority(StrEnum):
 
 
 class IssueStatus(StrEnum):
+    OPEN = "OPEN"
     IN_PROGRESS = "IN_PROGRESS"
     RESOLVED = "RESOLVED"
     HOLD = "HOLD"
@@ -34,9 +36,3 @@ class Shift(StrEnum):
     A = "A"
     B = "B"
     C = "C"
-
-class Role(StrEnum):
-    SUPPORTER = "SUPPORTER"
-    DEVELOPER = "DEVELOPER"
-    ADMIN = "ADMIN"
-

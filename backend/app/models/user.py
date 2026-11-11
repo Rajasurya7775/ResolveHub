@@ -24,7 +24,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
     role: Mapped[str] = mapped_column(String(20), nullable=False)
-    role_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    role_type: Mapped[str] = mapped_column(String(100), nullable=False)
     account_status: Mapped[str] = mapped_column(String(20), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
