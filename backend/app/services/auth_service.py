@@ -1,29 +1,18 @@
-from app.core.security import (
-    create_access_token,
-    verify_password,
-)
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.security import verify_password
+from app.models import User
 
 
-def authenticate_user(user, password: str):
-    """
-    Authenticate a user using the supplied password.
+def authenticate_user(db: Session, email: str, password: str) -> User:
+    user = db.execute(
+        select(User).where(User.email == email.lower())
+    ).scalar_one_or_none()
 
-    Returns the user if authentication succeeds; otherwise, returns None.
-    The user object must have a hashed_password attribute.
-    """
-    if user is None:
-        return None
-
-    if not verify_password(password, user.hashed_password):
-        return None
+    # same message for unknown email and wrong password
+    if user is None or not verify_password(password, user.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
     return user
-
-
-def generate_user_token(user) -> str:
-    """
-    Generate a JWT access token for an authenticated user.
-
-    The user object must have an id attribute.
-    """
-    return create_access_token(subject=str(user.id))
