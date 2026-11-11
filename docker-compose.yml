@@ -1,0 +1,13 @@
+services:
+  backend:
+    build:
+      context: .
+    container_name: resolvehub-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      DATABASE_URL: postgresql+psycopg://admin:admin123@host.docker.internal:5432/mydatabase
+      SECRET_KEY: local-development-secret-change-before-deployment
+    restart: unless-stopped

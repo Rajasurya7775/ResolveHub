@@ -1,0 +1,18 @@
+# Environment
+.env
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Seed files
+seed_*.py
+
+# Test files
+test_*.py
+tests/
+
+# Logs
+*.log
