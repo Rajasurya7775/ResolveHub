@@ -153,6 +153,7 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   position: relative;
   display: flex;
   align-items: center;
+  margin-bottom: 15px;
 }
 
 .input-icon-group .leading-icon {
