@@ -57,14 +57,14 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
             className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center fw-bold shadow-sm"
             style={{ width: '36px', height: '36px', fontSize: '0.95rem' }}
           >
-            {currentUser?.name?.charAt(0) || 'S'}
+            {currentUser?.name?.charAt(0).toUpperCase() || 'U'}
           </div>
           <div className="d-none d-sm-block text-start lh-1">
             <div className="fw-bold text-navy" style={{ fontSize: '0.86rem' }}>
-              {currentUser?.name || 'Surya'}
+              {currentUser?.name || 'User'}
             </div>
             <div className="text-muted mt-0.5" style={{ fontSize: '0.72rem' }}>
-              {currentUser?.employeeId || 'EMP101'}
+              {currentUser?.employeeId || ''}
             </div>
           </div>
           <i className="bi bi-chevron-down text-muted small ms-0.5"></i>

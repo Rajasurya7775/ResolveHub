@@ -301,7 +301,7 @@ export const IssueDetailsModal: React.FC<IssueDetailsModalProps> = ({ issue, onC
                     <div className="text-muted small d-flex align-items-center gap-1.5 mt-3 pt-2 border-top" style={{ fontSize: '0.75rem' }}>
                       <i className="bi bi-info-circle text-primary"></i>
                       <span>
-                        Note: Status transitions, developer assignment, and RCA fields are controlled exclusively by Developers & Administrators.
+                        Note: Status transitions, developer assignment, and RCA fields are controlled exclusively by Developers.
                       </span>
                     </div>
 

@@ -1,12 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, UserRole } from '../types/user';
-import { MOCK_USERS, DEFAULT_SUPPORTER } from '../data/mockUsers';
+import { User, UserRole, SignupFormData } from '../types/user';
+import { apiLogin, apiSignup } from '../services/api/authService';
 
 interface AuthContextType {
   currentUser: User | null;
   selectedRole: UserRole;
   setSelectedRole: (role: UserRole) => void;
-  login: (role: UserRole, identifier: string, password?: string) => { success: boolean; message?: string };
+  login: (role: UserRole, identifier: string, password?: string) => Promise<{ success: boolean; message?: string; user?: User }>;
+  signup: (data: SignupFormData) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   updateProfile: (updatedData: Partial<User>) => void;
   isAuthenticated: boolean;
@@ -17,64 +18,92 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_STORAGE_KEY = 'resolvehub_auth_user';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Pure dynamic session: No default dummy Surya user
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : DEFAULT_SUPPORTER;
+      return saved ? JSON.parse(saved) : null;
     } catch {
-      return DEFAULT_SUPPORTER;
+      return null;
     }
   });
 
-  const [selectedRole, setSelectedRole] = useState<UserRole>('Supporter');
+  const [selectedRole, setSelectedRole] = useState<UserRole>('Support');
 
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser));
     } else {
       localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem('resolvehub_auth_token');
     }
   }, [currentUser]);
 
-  const login = (role: UserRole, identifier: string, _password?: string): { success: boolean; message?: string } => {
-    const trimmedId = identifier.trim().toLowerCase();
+  const login = async (
+    role: UserRole,
+    identifier: string,
+    password?: string
+  ): Promise<{ success: boolean; message?: string; user?: User }> => {
+    const isMock = import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
 
-    // Look for matching user by email or employeeId
-    const matched = MOCK_USERS.find(
-      (u) =>
-        (u.email.toLowerCase() === trimmedId || u.employeeId.toLowerCase() === trimmedId) &&
-        (role === 'Supporter' ? u.role === 'Supporter' : u.role === 'Admin' || u.role === 'Developer')
-    );
+    // 1. Authenticate via real Backend API (Authorization is handled directly by the backend)
+    if (!isMock) {
+      const apiResult = await apiLogin(role, identifier, password);
 
-    if (matched) {
-      setCurrentUser(matched);
-      return { success: true };
+      if (!apiResult.success || !apiResult.user) {
+        return {
+          success: false,
+          message: apiResult.message || 'Invalid credentials. Please verify your Email/Employee ID and Password.'
+        };
+      }
+
+      const returnedUser = apiResult.user;
+
+      // Authenticated session accepted from backend
+      setCurrentUser(returnedUser);
+      setSelectedRole(returnedUser.role);
+      return { success: true, user: returnedUser };
     }
 
-    // If no exact match found, provide helpful mock fallback for prototype
-    if (role === 'Supporter') {
-      const fallbackUser: User = {
-        ...DEFAULT_SUPPORTER,
-        name: trimmedId.includes('@') ? trimmedId.split('@')[0] : trimmedId.toUpperCase(),
-        email: trimmedId.includes('@') ? trimmedId : `${trimmedId.toLowerCase()}@resolvehub.com`
+    // 2. Mock mode: Only available if user explicitly turns on mock in .env
+    return {
+      success: false,
+      message: 'Mock data has been disabled. Please connect to the backend server.'
+    };
+  };
+
+  const signup = async (
+    data: SignupFormData
+  ): Promise<{ success: boolean; message?: string }> => {
+    const isMock = import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
+
+    if (!isMock) {
+      const apiResult = await apiSignup(data);
+      if (apiResult.success && apiResult.user) {
+        setCurrentUser(apiResult.user);
+        setSelectedRole(apiResult.user.role);
+        return { success: true };
+      }
+      return {
+        success: false,
+        message: apiResult.message || 'Registration failed on backend server.'
       };
-      setCurrentUser(fallbackUser);
-      return { success: true };
-    } else {
-      const adminFallback = MOCK_USERS.find((u) => u.role === 'Admin' || u.role === 'Developer') || MOCK_USERS[3];
-      setCurrentUser(adminFallback);
-      return { success: true };
     }
+
+    return {
+      success: false,
+      message: 'Mock data has been disabled.'
+    };
   };
 
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem('resolvehub_auth_token');
   };
 
   const updateProfile = (updatedData: Partial<User>) => {
     if (!currentUser) return;
-    // Supporter cannot modify role or employee ID
     const sanitized: User = {
       ...currentUser,
       ...updatedData,
@@ -91,6 +120,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         selectedRole,
         setSelectedRole,
         login,
+        signup,
         logout,
         updateProfile,
         isAuthenticated: !!currentUser
@@ -108,4 +138,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

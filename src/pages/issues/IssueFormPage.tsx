@@ -36,7 +36,7 @@ export const IssueFormPage: React.FC = () => {
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) {
@@ -45,7 +45,7 @@ export const IssueFormPage: React.FC = () => {
     }
 
     setErrors({});
-    const created = addIssue({
+    const created = await addIssue({
       projectId,
       issueType,
       occurrenceTime,

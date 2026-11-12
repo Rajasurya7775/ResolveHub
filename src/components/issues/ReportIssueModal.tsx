@@ -41,7 +41,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) {
@@ -52,8 +52,8 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
     setIsSubmitting(true);
     setErrors({});
 
-    setTimeout(() => {
-      const created = addIssue({
+    try {
+      const created = await addIssue({
         projectId,
         issueType,
         occurrenceTime,
@@ -67,7 +67,9 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
       } else {
         onClose();
       }
-    }, 250);
+    } catch {
+      setIsSubmitting(false);
+    }
   };
 
   const handleReset = () => {

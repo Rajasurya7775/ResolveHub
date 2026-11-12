@@ -1,38 +1,69 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useIssues } from '../../context/IssueContext';
 import { HomeInsights } from '../../components/dashboard/HomeInsights';
 import { ReportIssueModal } from '../../components/issues/ReportIssueModal';
+import { apiFetchDashboardSummary, DashboardSummary } from '../../services/api/dashboardService';
 
 export const HomePage: React.FC = () => {
   const { currentUser } = useAuth();
-  const { issues } = useIssues();
+  const { issues, refreshIssues } = useIssues();
 
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // Fetch live Dashboard Summary KPI metrics from backend API
+  // Endpoint: http://10.91.17.113:8000/api/v1/dashboard/summary
+  const loadDashboardSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    const res = await apiFetchDashboardSummary();
+    if (res.success && res.data) {
+      setSummary(res.data);
+    }
+    setSummaryLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadDashboardSummary();
+  }, [loadDashboardSummary]);
 
   // Filter issues for currently logged-in supporter
   const myIssues = issues.filter(
     (i) => i.reportedById === currentUser?.employeeId || i.reportedBy === currentUser?.name
   );
 
-  // KPI Calculations
-  const totalLogged = myIssues.length;
-  const resolvedCount = myIssues.filter((i) => i.status === 'Resolved').length;
-  const inProgressCount = myIssues.filter((i) => i.status === 'In Progress').length;
-  const openCount = myIssues.filter((i) => i.status === 'Open').length;
-  const acceptedCount = myIssues.filter((i) => i.status === 'Accepted').length;
+  // KPI Metrics: Loaded dynamically from backend API summary endpoint
+  const totalLogged = summary ? summary.totalLogged : myIssues.length;
+  const activeCount = summary
+    ? summary.activeCount
+    : Math.max(0, myIssues.length - myIssues.filter((i) => i.status === 'Resolved').length);
+  const resolvedCount = summary
+    ? summary.resolvedCount
+    : myIssues.filter((i) => i.status === 'Resolved').length;
+  const inProgressCount = summary
+    ? summary.inProgressCount
+    : myIssues.filter((i) => i.status === 'In Progress').length;
+  const openCount = summary
+    ? summary.openCount
+    : myIssues.filter((i) => i.status === 'Open').length;
+  const acceptedCount = summary
+    ? summary.acceptedCount
+    : myIssues.filter((i) => i.status === 'Accepted').length;
 
   const handleIssueCreated = (issueId: string) => {
     setIsReportModalOpen(false);
     setSuccessToast(`Issue ${issueId} reported successfully!`);
+    loadDashboardSummary();
+    refreshIssues();
     setTimeout(() => setSuccessToast(null), 3500);
   };
 
   return (
     <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '1rem' }}>
       
-      {/* Floating Toast Alert - Does not disrupt even grid spacing */}
+      {/* Floating Toast Alert */}
       {successToast && (
         <div
           className="alert alert-success py-2 px-3.5 rounded-3 shadow-sm small d-flex align-items-center justify-content-between position-fixed top-0 start-50 translate-middle-x mt-3"
@@ -54,7 +85,7 @@ export const HomePage: React.FC = () => {
       <div className="welcome-card-reference flex-shrink-0">
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
           
-          {/* Welcome Message with logged-in supporter's name & Laptop icon */}
+          {/* Welcome Message with logged-in supporter's real identity */}
           <div className="d-flex align-items-center gap-3.5">
             <div className="welcome-icon-box">
               <i className="bi bi-laptop"></i>
@@ -62,11 +93,13 @@ export const HomePage: React.FC = () => {
             <div>
               <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
                 <h4 className="fw-bold text-navy mb-0" style={{ fontSize: '1.5rem', letterSpacing: '-0.4px' }}>
-                  Welcome, {currentUser?.name || 'Surya'}!
+                  Welcome, {currentUser?.name || 'Supporter'}!
                 </h4>
-                <span className="badge bg-primary-subtle text-primary rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5" style={{ fontSize: '0.78rem' }}>
-                  <i className="bi bi-person-badge"></i> Supporter ({currentUser?.employeeId || 'EMP101'})
-                </span>
+                {currentUser?.employeeId && (
+                  <span className="badge bg-primary-subtle text-primary rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5" style={{ fontSize: '0.78rem' }}>
+                    <i className="bi bi-person-badge"></i> {currentUser.employeeId}
+                  </span>
+                )}
                 <span className="badge bg-success-subtle text-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5" style={{ fontSize: '0.78rem' }}>
                   <i className="bi bi-check-circle-fill"></i> Active Session
                 </span>
@@ -77,8 +110,19 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Report Issue Button on the right side */}
-          <div>
+          {/* Action Row */}
+          <div className="d-flex align-items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm px-3 py-2 d-inline-flex align-items-center gap-1.5 rounded-3 shadow-sm"
+              onClick={loadDashboardSummary}
+              title="Refresh KPI metrics from backend API"
+              disabled={summaryLoading}
+            >
+              <i className={`bi bi-arrow-clockwise ${summaryLoading ? 'spin' : ''}`}></i>
+              <span className="d-none d-sm-inline">Refresh KPIs</span>
+            </button>
+
             <button
               type="button"
               className="btn btn-primary px-4 py-2.5 d-inline-flex align-items-center gap-2 rounded-3 shadow-sm fw-semibold"
@@ -109,7 +153,9 @@ export const HomePage: React.FC = () => {
               <h4 className="fw-bold text-navy mb-0 mt-0.5" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
                 {totalLogged}
               </h4>
-              <small className="text-secondary" style={{ fontSize: '0.72rem' }}>Reported by you</small>
+              <small className="text-secondary" style={{ fontSize: '0.72rem' }}>
+                {summary ? 'Live backend API' : 'Logged issues'}
+              </small>
             </div>
           </div>
         </div>
@@ -125,7 +171,7 @@ export const HomePage: React.FC = () => {
                 Active / Resolved
               </span>
               <h4 className="fw-bold text-navy mb-0 mt-0.5" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
-                <span className="text-primary">{totalLogged - resolvedCount}</span>
+                <span className="text-primary">{activeCount}</span>
                 <span className="text-muted fs-6 fw-normal mx-1">/</span>
                 <span className="text-success">{resolvedCount}</span>
               </h4>

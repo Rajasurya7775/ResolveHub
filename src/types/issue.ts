@@ -21,7 +21,7 @@ export interface DiscussionMessage {
   issueId: string;
   senderId: string;
   senderName: string;
-  senderRole: 'Supporter' | 'Developer' | 'Admin';
+  senderRole: 'Support' | 'Supporter' | 'Developer';
   message: string;
   timestamp: string;
 }

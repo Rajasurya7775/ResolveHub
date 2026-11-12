@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types/user';
 import { BrandLogo } from '../../components/common/BrandLogo';
@@ -9,8 +9,9 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { selectedRole, setSelectedRole, login } = useAuth();
 
-  const [identifier, setIdentifier] = useState('surya@resolvehub.com');
-  const [password, setPassword] = useState('password123');
+  // No mock data: purely user-entered credentials
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -18,14 +19,9 @@ export const LoginPage: React.FC = () => {
   const handleRoleSelect = (role: UserRole) => {
     setSelectedRole(role);
     setErrorMsg('');
-    if (role === 'Supporter') {
-      setIdentifier('surya@resolvehub.com');
-    } else {
-      setIdentifier('arun@resolvehub.com');
-    }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -41,21 +37,29 @@ export const LoginPage: React.FC = () => {
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      const result = login(selectedRole, identifier, password);
+    try {
+      const result = await login(selectedRole, identifier, password);
       setIsSubmitting(false);
 
       if (result.success) {
-        if (selectedRole === 'Supporter') {
-          navigate('/home');
+        // Navigate based on the authenticated user's role returned by the backend
+        const userRole = result.user?.role || selectedRole;
+        if (userRole === 'Developer') {
+          navigate('/developer');
         } else {
-          navigate('/admin');
+          navigate('/home');
         }
       } else {
         setErrorMsg(result.message || 'Authentication failed. Please verify your credentials.');
       }
-    }, 350);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setErrorMsg(err.message || 'Authentication error occurred.');
+    }
   };
+
+  const isSupportActive = selectedRole === 'Support' || selectedRole === 'Supporter';
+  const isDeveloperActive = selectedRole === 'Developer';
 
   return (
     <div className="login-page-wrapper">
@@ -80,12 +84,10 @@ export const LoginPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Hero Graphic - Scaled cleanly to fill column */}
+            {/* Hero Graphic */}
             <div className="my-1 d-none d-md-block" style={{ maxHeight: 'min(290px, 32vh)' }}>
               <LoginHeroGraphic />
             </div>
-
-            
 
           </div>
 
@@ -109,26 +111,26 @@ export const LoginPage: React.FC = () => {
                 </p>
               </div>
 
-              {/* Clean Role Selection Cards */}
+              {/* Role Selection Cards: ONLY Support & Developer */}
               <div className="row g-2.5 mb-3">
                 
-                {/* Supporter Tile */}
+                {/* Support Tile */}
                 <div className="col-6">
                   <div
-                    className={`role-card-minimal h-100 ${selectedRole === 'Supporter' ? 'selected' : ''}`}
-                    onClick={() => handleRoleSelect('Supporter')}
+                    className={`role-card-minimal h-100 ${isSupportActive ? 'selected' : ''}`}
+                    onClick={() => handleRoleSelect('Support')}
                     role="button"
                     tabIndex={0}
                   >
                     <div className="d-flex align-items-center justify-content-center gap-1.5 mb-1">
-                      <i className={`bi bi-headset fs-5 ${selectedRole === 'Supporter' ? 'text-primary' : 'text-secondary'}`}></i>
-                      <span className="fw-bold text-navy" style={{ fontSize: '0.95rem' }}>Supporter</span>
+                      <i className={`bi bi-headset fs-5 ${isSupportActive ? 'text-primary' : 'text-secondary'}`}></i>
+                      <span className="fw-bold text-navy" style={{ fontSize: '0.95rem' }}>Support</span>
                     </div>
                     <div className="text-muted" style={{ fontSize: '0.74rem', lineHeight: 1.25 }}>
-                      Support Team Members
+                      Incident Reporting & Shifts
                     </div>
 
-                    {selectedRole === 'Supporter' && (
+                    {isSupportActive && (
                       <div className="role-check-badge">
                         <i className="bi bi-check-lg"></i>
                       </div>
@@ -136,23 +138,23 @@ export const LoginPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Admin Tile */}
+                {/* Developer Tile */}
                 <div className="col-6">
                   <div
-                    className={`role-card-minimal h-100 ${selectedRole === 'Admin' ? 'selected' : ''}`}
-                    onClick={() => handleRoleSelect('Admin')}
+                    className={`role-card-minimal h-100 ${isDeveloperActive ? 'selected' : ''}`}
+                    onClick={() => handleRoleSelect('Developer')}
                     role="button"
                     tabIndex={0}
                   >
                     <div className="d-flex align-items-center justify-content-center gap-1.5 mb-1">
-                      <i className={`bi bi-code-square fs-5 ${selectedRole === 'Admin' ? 'text-primary' : 'text-secondary'}`}></i>
-                      <span className="fw-bold text-navy" style={{ fontSize: '0.95rem' }}>Admin</span>
+                      <i className={`bi bi-code-slash fs-5 ${isDeveloperActive ? 'text-primary' : 'text-secondary'}`}></i>
+                      <span className="fw-bold text-navy" style={{ fontSize: '0.95rem' }}>Developer</span>
                     </div>
                     <div className="text-muted" style={{ fontSize: '0.74rem', lineHeight: 1.25 }}>
-                      Developers & Admins
+                      Triage & Bug Fixes
                     </div>
 
-                    {selectedRole === 'Admin' && (
+                    {isDeveloperActive && (
                       <div className="role-check-badge">
                         <i className="bi bi-check-lg"></i>
                       </div>
@@ -164,13 +166,13 @@ export const LoginPage: React.FC = () => {
 
               {/* Sub-greeting */}
               <div className="text-center text-muted mb-2.5" style={{ fontSize: '0.88rem' }}>
-                Hello! Please login to continue
+                Login to access your <strong>{isSupportActive ? 'Support' : 'Developer'}</strong> console
               </div>
 
               {/* Error Alert */}
               {errorMsg && (
-                <div className="alert alert-danger py-1.5 px-3 small rounded-3 d-flex align-items-center mb-2.5">
-                  <i className="bi bi-exclamation-triangle-fill me-2 flex-shrink-0"></i>
+                <div className="alert alert-danger py-2 px-3 small rounded-3 d-flex align-items-center mb-2.5">
+                  <i className="bi bi-exclamation-triangle-fill me-2 fs-6 flex-shrink-0"></i>
                   <span>{errorMsg}</span>
                 </div>
               )}
@@ -178,10 +180,10 @@ export const LoginPage: React.FC = () => {
               {/* Form */}
               <form onSubmit={handleSubmit} noValidate>
                 
-                {/* Email / Username */}
+                {/* Email / Employee ID */}
                 <div className="mb-2.5">
                   <div className="input-icon-group">
-                    <i className="bi bi-envelope leading-icon"></i>
+                    <i className="bi bi-person-badge leading-icon"></i>
                     <input
                       type="text"
                       className="form-control custom-form-control"
@@ -189,6 +191,7 @@ export const LoginPage: React.FC = () => {
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
                       required
+                      autoComplete="username"
                     />
                   </div>
                 </div>
@@ -204,6 +207,7 @@ export const LoginPage: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
+                      autoComplete="current-password"
                     />
                     <button
                       type="button"
@@ -221,16 +225,12 @@ export const LoginPage: React.FC = () => {
                 <div className="d-flex align-items-center justify-content-between pt-1">
                   <div className="text-secondary" style={{ fontSize: '0.85rem' }}>
                     No account?{' '}
-                    <a
-                      href="#signup"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        alert('Account provisioning is managed by ResolveHub IT Directory.');
-                      }}
+                    <Link
+                      to="/signup"
                       className="text-primary text-decoration-none fw-semibold"
                     >
                       Sign Up
-                    </a>
+                    </Link>
                   </div>
 
                   <button
@@ -241,7 +241,7 @@ export const LoginPage: React.FC = () => {
                     {isSubmitting ? (
                       <>
                         <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                        Logging in...
+                        Authenticating...
                       </>
                     ) : (
                       'Login'

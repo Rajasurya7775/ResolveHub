@@ -30,18 +30,8 @@ export const MOCK_USERS: User[] = [
     phone: '+91 98765 43212',
     accountStatus: 'Active',
     avatarUrl: ''
-  },
-  {
-    id: 'usr-206',
-    employeeId: 'EMP206',
-    name: 'Kumar',
-    email: 'kumar@resolvehub.com',
-    role: 'Admin',
-    phone: '+91 98765 43213',
-    accountStatus: 'Active',
-    avatarUrl: ''
   }
 ];
 
-export const DEFAULT_SUPPORTER = MOCK_USERS[0]; // Surya
+export const DEFAULT_SUPPORTER = MOCK_USERS[0];
 

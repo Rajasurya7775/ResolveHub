@@ -5,9 +5,10 @@ import { StatusBadge } from '../../components/common/StatusBadge';
 import { IssueDetailsModal } from './IssueDetailsModal';
 import { Issue } from '../../types/issue';
 import { ShiftType } from '../../types/user';
+import { exportIssuesToCsv } from '../../utils/exportUtils';
 
 export const MyIssuesPage: React.FC = () => {
-  const { issues, deleteIssue } = useIssues();
+  const { myIssues, deleteIssue, isLoading, myIssuesError, refreshMyIssues } = useIssues();
   const { currentUser } = useAuth();
 
   // The 6 Specified Filters:
@@ -31,16 +32,9 @@ export const MyIssuesPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 6;
 
-  // DISPLAY ONLY ISSUES CREATED BY LOGGED-IN SUPPORTER
-  const supporterOnlyIssues = useMemo(() => {
-    return issues.filter(
-      (i) => i.reportedById === currentUser?.employeeId || i.reportedBy === currentUser?.name
-    );
-  }, [issues, currentUser]);
-
-  // Combined Filters Logic
+  // Combined Filters Logic on live issues from /my-issues/
   const filteredIssues = useMemo(() => {
-    return supporterOnlyIssues.filter((issue) => {
+    return myIssues.filter((issue) => {
       // 1. Issue ID / Title search
       const searchLower = searchTerm.toLowerCase();
       const matchSearch =
@@ -68,7 +62,7 @@ export const MyIssuesPage: React.FC = () => {
 
       return matchSearch && matchProject && matchType && matchDate && matchShift && matchStatus;
     });
-  }, [supporterOnlyIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
+  }, [myIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
 
   const totalPages = Math.ceil(filteredIssues.length / itemsPerPage) || 1;
   const paginatedIssues = filteredIssues.slice(
@@ -159,12 +153,10 @@ export const MyIssuesPage: React.FC = () => {
               }}
             >
               <option value="All">All Types</option>
-              <option value="Production Issue">Production</option>
-              <option value="Dashboard Issue">Dashboard</option>
-              <option value="Network Issue">Network</option>
-              <option value="Application Issue">Application</option>
-              <option value="Hardware Issue">Hardware</option>
-              <option value="Other">Other</option>
+              <option value="FRONTEND">Frontend Issue</option>
+              <option value="BACKEND">Backend Issue</option>
+              <option value="DATABASE">Database Issue</option>
+              <option value="OTHERS">Others</option>
             </select>
           </div>
 
@@ -198,9 +190,9 @@ export const MyIssuesPage: React.FC = () => {
               }}
             >
               <option value="All">All</option>
-              <option value="Shift A">Shift A</option>
-              <option value="Shift B">Shift B</option>
-              <option value="Shift C">Shift C</option>
+              <option value="A">Shift A</option>
+              <option value="B">Shift B</option>
+              <option value="C">Shift C</option>
             </select>
           </div>
 
@@ -219,7 +211,7 @@ export const MyIssuesPage: React.FC = () => {
             >
               <option value="All">All</option>
               <option value="Open">Open</option>
-              <option value="Accepted">Accepted</option>
+              <option value="Hold">Hold</option>
               <option value="In Progress">In Prog</option>
               <option value="Resolved">Resolved</option>
             </select>
@@ -240,20 +232,58 @@ export const MyIssuesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* API Connection Warning / Retry Alert */}
+      {myIssuesError && (
+        <div className="alert alert-warning py-1.5 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-2 flex-shrink-0">
+          <div className="d-flex align-items-center gap-2">
+            <i className="bi bi-exclamation-triangle-fill text-warning fs-6"></i>
+            <span>{myIssuesError}</span>
+          </div>
+          <button className="btn btn-sm btn-outline-dark py-0 px-2" onClick={refreshMyIssues}>
+            Retry API
+          </button>
+        </div>
+      )}
+
       {/* ================= MAIN MY ISSUES TABLE ================= */}
       <div className="fixed-table-card flex-grow-1 min-h-0">
         
         {/* Sub-header info bar */}
         <div className="px-3 py-1.5 border-bottom bg-light d-flex align-items-center justify-content-between flex-shrink-0">
-          <div className="small fw-semibold text-navy">
-            My Reported Issues
-            <span className="badge bg-primary text-white rounded-pill ms-2" style={{ fontSize: '0.68rem' }}>
-              {filteredIssues.length} of {supporterOnlyIssues.length} issues
+          <div className="d-flex align-items-center gap-2">
+            <span className="small fw-semibold text-navy">
+              My Reported Issues
+            </span>
+            <span className="badge bg-primary text-white rounded-pill" style={{ fontSize: '0.68rem' }}>
+              {filteredIssues.length} of {myIssues.length} issues
             </span>
           </div>
 
-          <div className="small text-muted" style={{ fontSize: '0.72rem' }}>
-            Logged by: <strong className="text-navy">{currentUser?.name}</strong> ({currentUser?.employeeId})
+          <div className="d-flex align-items-center gap-2">
+            <span className="small text-muted d-none d-md-inline" style={{ fontSize: '0.72rem' }}>
+              Logged in: <strong className="text-navy">{currentUser?.name}</strong> ({currentUser?.employeeId})
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
+              style={{ fontSize: '0.74rem' }}
+              onClick={refreshMyIssues}
+              disabled={isLoading}
+              title="Refresh from /my-issues/ endpoint"
+            >
+              <i className={`bi bi-arrow-clockwise ${isLoading ? 'spinner-border spinner-border-sm' : ''}`}></i>
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-success py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
+              style={{ fontSize: '0.74rem' }}
+              onClick={() => exportIssuesToCsv(filteredIssues, `my_issues_${currentUser?.employeeId || 'export'}.csv`)}
+              title="Export filtered issues to CSV"
+            >
+              <i className="bi bi-file-earmark-spreadsheet"></i>
+              Export CSV
+            </button>
           </div>
         </div>
 

@@ -7,9 +7,9 @@ export const ProfilePage: React.FC = () => {
   const currentShift = getCurrentShift();
 
   const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(currentUser?.name || 'Surya');
-  const [email, setEmail] = useState(currentUser?.email || 'surya@resolvehub.com');
-  const [phone, setPhone] = useState(currentUser?.phone || '+91 98765 43210');
+  const [name, setName] = useState(currentUser?.name || '');
+  const [email, setEmail] = useState(currentUser?.email || '');
+  const [phone, setPhone] = useState(currentUser?.phone || '');
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const handleSave = (e: React.FormEvent) => {
@@ -64,7 +64,7 @@ export const ProfilePage: React.FC = () => {
             className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center fw-bold shadow-sm"
             style={{ width: '54px', height: '54px', fontSize: '1.4rem' }}
           >
-            {currentUser?.name?.charAt(0) || 'S'}
+            {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
           </div>
           <div>
             <h5 className="fw-bold text-navy mb-1 fs-6">{currentUser?.name}</h5>
@@ -72,6 +72,12 @@ export const ProfilePage: React.FC = () => {
               <span className="badge bg-primary px-2.5 py-0.5 rounded-pill small">
                 {currentUser?.role}
               </span>
+              {currentUser?.roleType && (
+                <span className="badge bg-info-subtle text-info-emphasis border border-info-subtle px-2.5 py-0.5 rounded-pill small">
+                  <i className="bi bi-diagram-3 me-1"></i>
+                  {currentUser.roleType}
+                </span>
+              )}
               <span className="badge bg-light text-secondary border px-2 py-0.5 rounded-pill small">
                 {currentUser?.employeeId}
               </span>

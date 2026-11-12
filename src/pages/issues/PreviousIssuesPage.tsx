@@ -5,9 +5,10 @@ import { StatusBadge } from '../../components/common/StatusBadge';
 import { IssueDetailsModal } from './IssueDetailsModal';
 import { Issue } from '../../types/issue';
 import { ShiftType } from '../../types/user';
+import { exportIssuesToCsv } from '../../utils/exportUtils';
 
 export const PreviousIssuesPage: React.FC = () => {
-  const { issues } = useIssues();
+  const { previousIssues, isLoading, previousIssuesError, refreshPreviousIssues } = useIssues();
   const { currentUser } = useAuth();
 
   // The 6 Filters specified by user:
@@ -30,17 +31,9 @@ export const PreviousIssuesPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 6;
 
-  // Previous Issues reported by current supporter (with RCA / Resolved history)
-  const supporterHistoricalIssues = useMemo(() => {
-    return issues.filter(
-      (i) =>
-        (i.status === 'Resolved' || i.rca) &&
-        (i.reportedById === currentUser?.employeeId || i.reportedBy === currentUser?.name)
-    );
-  }, [issues, currentUser]);
-
+  // Filter on live issues from /previous-issues/
   const filteredIssues = useMemo(() => {
-    return supporterHistoricalIssues.filter((issue) => {
+    return previousIssues.filter((issue) => {
       // 1. Search ID / Title
       const searchLower = searchTerm.toLowerCase();
       const matchSearch =
@@ -69,7 +62,7 @@ export const PreviousIssuesPage: React.FC = () => {
 
       return matchSearch && matchProject && matchType && matchDate && matchShift && matchStatus;
     });
-  }, [supporterHistoricalIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
+  }, [previousIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
 
   const totalPages = Math.ceil(filteredIssues.length / itemsPerPage) || 1;
   const paginatedIssues = filteredIssues.slice(
@@ -231,6 +224,19 @@ export const PreviousIssuesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* API Connection Warning / Retry Alert */}
+      {previousIssuesError && (
+        <div className="alert alert-warning py-1.5 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-2 flex-shrink-0">
+          <div className="d-flex align-items-center gap-2">
+            <i className="bi bi-exclamation-triangle-fill text-warning fs-6"></i>
+            <span>{previousIssuesError}</span>
+          </div>
+          <button className="btn btn-sm btn-outline-dark py-0 px-2" onClick={refreshPreviousIssues}>
+            Retry API
+          </button>
+        </div>
+      )}
+
       {/* ================= MAIN PREVIOUS ISSUES TABLE ================= */}
       <div className="fixed-table-card flex-grow-1 min-h-0">
         
@@ -238,13 +244,36 @@ export const PreviousIssuesPage: React.FC = () => {
           <div className="small fw-semibold text-navy">
             Previous Issues Archive
             <span className="badge bg-success text-white rounded-pill ms-2" style={{ fontSize: '0.68rem' }}>
-              {filteredIssues.length} resolved tickets
+              {filteredIssues.length} of {previousIssues.length} resolved tickets
             </span>
           </div>
 
-          <span className="small text-muted" style={{ fontSize: '0.72rem' }}>
-            Root Cause Analysis (RCA) and discussion logs
-          </span>
+          <div className="d-flex align-items-center gap-2">
+            <span className="small text-muted d-none d-md-inline" style={{ fontSize: '0.72rem' }}>
+              Logged in: <strong className="text-navy">{currentUser?.name}</strong> ({currentUser?.employeeId})
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
+              style={{ fontSize: '0.74rem' }}
+              onClick={refreshPreviousIssues}
+              disabled={isLoading}
+              title="Refresh from /previous-issues/ endpoint"
+            >
+              <i className={`bi bi-arrow-clockwise ${isLoading ? 'spinner-border spinner-border-sm' : ''}`}></i>
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-success py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
+              style={{ fontSize: '0.74rem' }}
+              onClick={() => exportIssuesToCsv(filteredIssues, 'previous_resolved_issues.csv')}
+              title="Export historical issues to CSV"
+            >
+              <i className="bi bi-file-earmark-spreadsheet"></i>
+              Export CSV
+            </button>
+          </div>
         </div>
 
         {/* Scrollable table rows */}

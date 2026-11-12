@@ -85,6 +85,27 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   max-width: 440px;
 }
 
+.signup-card-container {
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 16px 40px rgba(30, 64, 175, 0.08), 0 4px 14px rgba(15, 23, 42, 0.03);
+  border: 1px solid #edf2f7;
+  padding: 1.6rem 2rem;
+  width: 100%;
+  max-width: 560px;
+  max-height: 94vh;
+  overflow-y: auto;
+}
+
+.signup-card-container::-webkit-scrollbar {
+  width: 5px;
+}
+
+.signup-card-container::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 10px;
+}
+
 /* Role Selector Tiles */
 .role-card-minimal {
   position: relative;
