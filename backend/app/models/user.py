@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
-
+from app.models.time_log import TimeLog
 from sqlalchemy import DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -54,4 +54,8 @@ class User(Base):
     # user_management 1 --- 0..* issue_messages_management ("sends")
     messages: Mapped[list["IssueMessage"]] = relationship(
         back_populates="sender",
+    )
+
+    time_logs: Mapped[list["TimeLog"]] = relationship(
+    back_populates="user",
     )
