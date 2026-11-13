@@ -1,7 +1,9 @@
+
 from datetime import date, datetime, time, timedelta
+from math import ceil
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Issue, Project
@@ -16,6 +18,8 @@ def get_previous_issues(
     issue_status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ):
     # Validate date range
     if date_from and date_to and date_from > date_to:
@@ -24,51 +28,64 @@ def get_previous_issues(
             detail="From date cannot be later than To date",
         )
 
-    # Start with all issues
-    query = select(Issue).options(joinedload(Issue.project))
+    # Build filters
+    filters = []
 
-    # Search by issue number OR issue title
     if search and search.strip():
         search_value = f"%{search.strip()}%"
-        query = query.where(
+        filters.append(
             or_(
                 Issue.issue_number.ilike(search_value),
                 Issue.issue_title.ilike(search_value),
             )
         )
 
-    # Filter by project name
     if project_name and project_name.strip():
-        query = query.join(Issue.project).where(
-            Project.project_name.ilike(project_name.strip())
+        filters.append(
+            Issue.project.has(
+                Project.project_name.ilike(project_name.strip())
+            )
         )
 
-    # Filter by issue type
     if issue_type:
-        query = query.where(Issue.issue_type == issue_type)
+        filters.append(Issue.issue_type == issue_type)
 
-    # Filter by shift
     if shift:
-        query = query.where(Issue.issue_shift == shift)
+        filters.append(Issue.issue_shift == shift)
 
-    # Filter by status
     if issue_status:
-        query = query.where(Issue.issue_status == issue_status)
+        filters.append(Issue.issue_status == issue_status)
 
-    # Filter from date
     if date_from:
         start_datetime = datetime.combine(date_from, time.min)
-        query = query.where(Issue.issue_created_at >= start_datetime)
+        filters.append(Issue.issue_created_at >= start_datetime)
 
-    # Filter to date (include entire day)
     if date_to:
         end_datetime = datetime.combine(
             date_to + timedelta(days=1),
             time.min,
         )
-        query = query.where(Issue.issue_created_at < end_datetime)
+        filters.append(Issue.issue_created_at < end_datetime)
 
-    # Newest issues first
-    query = query.order_by(Issue.issue_created_at.desc())
+    # Get total count before pagination
+    count_query = (
+        select(func.count())
+        .select_from(Issue)
+        .where(*filters)
+    )
+    total = db.scalar(count_query) or 0
 
-    return db.scalars(query).unique().all()
+    # Fetch paginated issues
+    query = (
+        select(Issue)
+        .options(joinedload(Issue.project))
+        .where(*filters)
+        .order_by(Issue.issue_created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    issues = db.scalars(query).unique().all()
+
+    return issues, total
+ 
