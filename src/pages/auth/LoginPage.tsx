@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types/user';
 import { BrandLogo } from '../../components/common/BrandLogo';
@@ -7,13 +7,18 @@ import { LoginHeroGraphic } from '../../components/auth/LoginHeroGraphic';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { selectedRole, setSelectedRole, login } = useAuth();
 
-  // No mock data: purely user-entered credentials
-  const [identifier, setIdentifier] = useState('');
+  const stateMsg = (location.state as any)?.message;
+  const prefillId = (location.state as any)?.registeredId || (location.state as any)?.registeredEmail || '';
+
+  // No mock data: purely user-entered credentials (or prefilled from recent signup)
+  const [identifier, setIdentifier] = useState(prefillId);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState(stateMsg || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleRoleSelect = (role: UserRole) => {
@@ -168,6 +173,21 @@ export const LoginPage: React.FC = () => {
               <div className="text-center text-muted mb-2.5" style={{ fontSize: '0.88rem' }}>
                 Login to access your <strong>{isSupportActive ? 'Support' : 'Developer'}</strong> console
               </div>
+
+              {/* Success Alert from Signup */}
+              {successMsg && (
+                <div className="alert alert-success py-2 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-2.5">
+                  <div className="d-flex align-items-center">
+                    <i className="bi bi-check-circle-fill me-2 fs-6 flex-shrink-0"></i>
+                    <span>{successMsg}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close btn-close-sm"
+                    onClick={() => setSuccessMsg('')}
+                  ></button>
+                </div>
+              )}
 
               {/* Error Alert */}
               {errorMsg && (

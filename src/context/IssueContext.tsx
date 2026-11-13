@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Issue, DiscussionMessage } from '../types/issue';
-import { ShiftType } from '../types/user';
+import { Issue, DiscussionMessage, IssueStatus } from '../types/issue';
 import { useAuth } from './AuthContext';
-import { getCurrentShift } from '../utils/shiftUtils';
 import {
   apiFetchMyIssues,
   apiFetchPreviousIssues,
@@ -13,13 +11,18 @@ import {
 } from '../services/api/issueService';
 import { useLocation } from 'react-router-dom';
 
-interface AddIssueInput {
-  projectId: Issue['projectId'];
+export interface AddIssueInput {
+  projectId: string;
+  shift: string;
+  occurrenceTime: string;
   title: string;
   description: string;
-  issueType: Issue['issueType'];
-  occurrenceTime: string;
-  shift?: ShiftType;
+  issueType: string;
+  rca?: string;
+  status?: string;
+  priority?: string;
+  assignedTo?: string;
+  assignedToId?: string;
 }
 
 interface IssueContextType {
@@ -176,7 +179,7 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [discussions, isAuthenticated]);
 
   const addIssue = async (data: AddIssueInput): Promise<Issue> => {
-    const detectedShift = data.shift || getCurrentShift().shift;
+    const chosenShift = data.shift || 'Shift-A';
     const shortDesc =
       data.description.length > 85 ? `${data.description.substring(0, 85)}...` : data.description;
     const todayStr = new Date().toISOString().split('T')[0];
@@ -189,7 +192,12 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         description: data.description,
         issueType: data.issueType,
         occurrenceTime: data.occurrenceTime,
-        shift: detectedShift,
+        shift: chosenShift,
+        status: (data.status as IssueStatus) || 'Open',
+        priority: data.priority || 'P2 – Moderate',
+        rca: data.rca,
+        assignedTo: data.assignedTo,
+        assignedToId: data.assignedToId,
         reportedById: currentUser?.employeeId || currentUser?.id,
         reportedBy: currentUser?.name
       });
@@ -200,7 +208,7 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
-    // Fallback if backend returns created issue or for local state
+    // Fallback for local state
     const newId = `ISS-${Date.now().toString().slice(-4)}`;
     const newIssue: Issue = {
       id: newId,
@@ -210,12 +218,15 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       description: data.description,
       issueType: data.issueType,
       occurrenceTime: data.occurrenceTime,
-      shift: detectedShift,
+      shift: chosenShift,
+      status: (data.status as IssueStatus) || 'Open',
+      priority: data.priority || 'P2 – Moderate',
+      rca: data.rca,
+      acceptedDeveloper: data.assignedTo || 'Unassigned',
+      acceptedDeveloperId: data.assignedToId,
       reportedBy: currentUser?.name || 'User',
       reportedById: currentUser?.employeeId || currentUser?.id || 'EMP',
       reportedDate: todayStr,
-      acceptedDeveloper: 'Unassigned',
-      status: 'Open',
       isEligibleForDelete: true
     };
 

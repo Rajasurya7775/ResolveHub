@@ -127,12 +127,14 @@ export const SignupPage: React.FC = () => {
       if (result.success) {
         setSignupSuccess(true);
         setTimeout(() => {
-          if (formData.role === 'Support' || formData.role === 'Supporter') {
-            navigate('/home');
-          } else {
-            navigate('/developer');
-          }
-        }, 1200);
+          navigate('/login', {
+            state: {
+              registeredId: formData.employee_id,
+              registeredEmail: formData.email,
+              message: 'Account created successfully! Please log in with your credentials.'
+            }
+          });
+        }, 1500);
       } else {
         setServerError(result.message || 'Registration failed. Please try again.');
       }
@@ -195,9 +197,14 @@ export const SignupPage: React.FC = () => {
 
               {/* Success Notification */}
               {signupSuccess && (
-                <div className="alert alert-success py-2 px-3 small rounded-3 d-flex align-items-center mb-2.5">
-                  <i className="bi bi-check-circle-fill me-2 fs-5 flex-shrink-0"></i>
-                  <span>Account registered successfully! Redirecting to your console...</span>
+                <div className="alert alert-success py-2.5 px-3 small rounded-3 d-flex align-items-center mb-3 shadow-xs">
+                  <i className="bi bi-check-circle-fill me-2 fs-5 text-success flex-shrink-0"></i>
+                  <div>
+                    <strong className="d-block text-success-emphasis">Account created successfully!</strong>
+                    <span className="text-secondary" style={{ fontSize: '0.78rem' }}>
+                      Redirecting you to the Login page...
+                    </span>
+                  </div>
                 </div>
               )}
 

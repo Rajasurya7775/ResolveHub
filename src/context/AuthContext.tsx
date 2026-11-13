@@ -79,9 +79,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!isMock) {
       const apiResult = await apiSignup(data);
-      if (apiResult.success && apiResult.user) {
-        setCurrentUser(apiResult.user);
-        setSelectedRole(apiResult.user.role);
+      if (apiResult.success) {
+        // Clear any auto-stored token so the user explicitly logs in on the login page
+        localStorage.removeItem('resolvehub_auth_token');
         return { success: true };
       }
       return {

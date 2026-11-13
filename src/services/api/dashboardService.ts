@@ -32,20 +32,12 @@ export async function apiFetchDashboardSummary(): Promise<{
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-    // Try /dashboard/summary first, fall back to /dashboard/summary/
+    // Try /dashboard/summary first, fall back to /dashboard/summary
     let response = await fetch(`${API_BASE_URL}/dashboard/summary`, {
       method: 'GET',
       headers: getAuthHeaders(),
       signal: controller.signal
     }).catch(() => null);
-
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/dashboard/summary/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal: controller.signal
-      }).catch(() => null);
-    }
 
     clearTimeout(timeoutId);
 

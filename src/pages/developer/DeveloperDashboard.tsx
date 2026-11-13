@@ -1,11 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { BrandLogo } from '../../components/common/BrandLogo';
+import { getCurrentShift } from '../../utils/shiftUtils';
 
 export const DeveloperDashboard: React.FC = () => {
   const { currentUser, logout, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  // Live timestamp
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const shiftInfo = getCurrentShift(currentTime);
+  const formattedDate = currentTime.toLocaleDateString('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+  const formattedTime = currentTime.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
 
   // Route protection
   if (!isAuthenticated || !currentUser) {
@@ -33,6 +56,24 @@ export const DeveloperDashboard: React.FC = () => {
           <span className="badge bg-primary-subtle text-primary border border-primary-subtle px-2.5 py-1 rounded-pill fw-semibold small">
             Developer Workspace
           </span>
+        </div>
+
+        {/* Center: Shift, Date & Live Time Widget */}
+        <div className="d-none d-md-flex align-items-center gap-2 gap-md-3 px-3 py-1.5 rounded-pill bg-light border border-light-subtle shadow-xs">
+          <span className="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle px-2.5 py-1 fw-semibold d-inline-flex align-items-center gap-1.5" style={{ fontSize: '0.78rem' }}>
+            <span className="rounded-circle bg-primary" style={{ width: '6px', height: '6px' }}></span>
+            <span>{shiftInfo.shift}</span>
+          </span>
+          <div className="vr text-muted" style={{ height: '14px', opacity: 0.35 }}></div>
+          <div className="text-secondary small fw-medium" style={{ fontSize: '0.8rem' }}>
+            <i className="bi bi-calendar3 text-muted me-1"></i>
+            <span className="text-navy">{formattedDate}</span>
+          </div>
+          <div className="vr text-muted" style={{ height: '14px', opacity: 0.35 }}></div>
+          <div className="text-navy font-monospace fw-bold small" style={{ fontSize: '0.82rem' }}>
+            <i className="bi bi-clock text-primary me-1"></i>
+            <span>{formattedTime}</span>
+          </div>
         </div>
 
         <div className="d-flex align-items-center gap-3">

@@ -80,14 +80,10 @@ export async function apiLogin(
   };
 
   // Try /auth/login/ first, fall back to /auth/login or /login/
-  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/login/`, reqOptions);
+  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/login `, reqOptions);
 
   if (!response || response.status === 404) {
-    response = await fetchWithTimeout(`${API_BASE_URL}/auth/login`, reqOptions);
-  }
-
-  if (!response || response.status === 404) {
-    response = await fetchWithTimeout(`${API_BASE_URL}/login/`, reqOptions);
+    response = await fetchWithTimeout(`${API_BASE_URL}/auth/login/`, reqOptions);
   }
 
   if (!response) {
@@ -156,16 +152,11 @@ export async function apiSignup(formData: SignupFormData): Promise<AuthResponse>
   };
 
   // Try /auth/signup/ first, fall back to /auth/signup or /auth/register/
-  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/signup/`, reqOptions);
+  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/signup`, reqOptions);
 
   if (!response || response.status === 404) {
-    response = await fetchWithTimeout(`${API_BASE_URL}/auth/signup`, reqOptions);
+    response = await fetchWithTimeout(`${API_BASE_URL}/auth/signup/`, reqOptions);
   }
-
-  if (!response || response.status === 404) {
-    response = await fetchWithTimeout(`${API_BASE_URL}/auth/register/`, reqOptions);
-  }
-
   if (!response) {
     return {
       success: false,
