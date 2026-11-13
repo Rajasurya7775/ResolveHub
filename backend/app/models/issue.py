@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date,datetime
 from typing import TYPE_CHECKING
-
-from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, func
+from app.models.audit_log import AuditLog
+from app.models.time_log import TimeLog
+from sqlalchemy import Date, DateTime, ForeignKey, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -59,7 +60,18 @@ class Issue(Base):
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    
+    shift_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+
+    deleted_by: Mapped[int | None] = mapped_column(
+        ForeignKey("user_management.user_id"),
+        nullable=True
     )
 
     project: Mapped["Project"] = relationship(back_populates="issues")
@@ -79,4 +91,13 @@ class Issue(Base):
         back_populates="issue",
         cascade="all, delete-orphan",
         order_by="IssueMessage.created_at",
+    )
+    audit_logs: Mapped[list["AuditLog"]] = relationship(
+    back_populates="issue",
+    cascade="all, delete-orphan",
+    )
+
+    time_logs: Mapped[list["TimeLog"]] = relationship(
+        back_populates="issue",
+        cascade="all, delete-orphan",
     )

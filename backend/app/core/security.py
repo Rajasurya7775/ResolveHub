@@ -1,8 +1,14 @@
 import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
+from dotenv import load_dotenv
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+
+# Load .env from the backend root directory
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path=ENV_FILE)
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 
