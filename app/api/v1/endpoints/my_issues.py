@@ -30,7 +30,7 @@ def get_my_issue_projects(
 
 
 # Get My Issues with filters
-@router.get("/", response_model=list[MyIssueResponse])
+@router.get("", response_model=list[MyIssueResponse])
 def read_my_issues(
     search: str | None = Query(default=None),
     project_name: str | None = Query(default=None),

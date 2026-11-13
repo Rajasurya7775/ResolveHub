@@ -19,7 +19,7 @@ class UserSignupResponse(BaseModel):
     employee_id: str
     full_name: str
     email: EmailStr
-    phone_number: str | None
+    phone_number: str 
     role: str
     role_type: str
     account_status: str

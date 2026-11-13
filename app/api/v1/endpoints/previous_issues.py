@@ -15,7 +15,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=list[PreviousIssueResponse])
+@router.get("", response_model=list[PreviousIssueResponse])
 def read_previous_issues(
     search: str | None = Query(default=None),
     project_name: str | None = Query(default=None),

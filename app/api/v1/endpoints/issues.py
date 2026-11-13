@@ -62,7 +62,7 @@ def get_issue_developers(
 
 # POST: Create a new issue
 @router.post(
-    "/",
+    "",
     response_model=IssueResponse,
     status_code=status.HTTP_201_CREATED,
 )
