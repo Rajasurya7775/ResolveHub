@@ -141,7 +141,7 @@ def get_my_issues_api(
 
 # POST: Create a new issue
 @router.post(
-    "/",
+    "",
     response_model=IssueResponse,
     status_code=status.HTTP_201_CREATED,
 )
