@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Environment
 .env
 venv/
@@ -16,3 +17,17 @@ tests/
 
 # Logs
 *.log
+=======
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.vscode/
+>>>>>>> origin/backend-1
