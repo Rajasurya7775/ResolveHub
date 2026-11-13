@@ -1,38 +1,71 @@
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
+from sqlalchemy.orm import Session
 
-from app.core.security import ALGORITHM, SECRET_KEY
+from app.core.enums import AccountStatus
+from app.core.security import decode_access_token
+from app.db.session import get_db
+from app.models import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_current_user_id(
-    token: str = Depends(oauth2_scheme),
-) -> str:
-    """
-    Validate the JWT and return the authenticated user's ID.
-
-    Database lookup will be added after the user model is confirmed.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or expired authentication token",
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status.HTTP_401_UNAUTHORIZED,
+        "Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    if credentials is None:
+        raise _unauthorized()
+
     try:
-        payload = jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM],
-        )
-        user_id = payload.get("sub")
+        payload = decode_access_token(credentials.credentials)  # <- adjust if needed
+        user_id = int(payload["sub"])                            # <- adjust if needed
+    except (JWTError, KeyError, TypeError, ValueError):
+        raise _unauthorized()
 
-        if not user_id:
-            raise credentials_exception
+    user = db.get(User, user_id)
+    if user is None:
+        raise _unauthorized()
 
-        return str(user_id)
+    if user.account_status != AccountStatus.ACTIVE:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is not active")
 
-    except JWTError:
-        raise credentials_exception
+    return user
+
+
+def require_roles(*allowed_roles: str):
+    def normalize_role(role):
+        role = getattr(role, "value", role)
+        role = str(role).strip().upper()
+
+        # Support existing database role naming
+        role_aliases = {
+            "SUPPORT": "SUPPORTER",
+            "SUPPORTER": "SUPPORTER",
+        }
+
+        return role_aliases.get(role, role)
+
+    allowed = {normalize_role(role) for role in allowed_roles}
+
+    def checker(current_user: User = Depends(get_current_user)) -> User:
+        user_role = normalize_role(current_user.role)
+
+        if user_role not in allowed:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Not enough permissions"
+            )
+
+        return current_user
+
+    return checker

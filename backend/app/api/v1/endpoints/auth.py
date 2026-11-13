@@ -1,22 +1,38 @@
+from app.schemas.signup import UserSignup, UserSignupResponse
+from app.services.signup_service import signup_user
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
 
-from app.schemas.auth import TokenResponse
+from app.api.deps import get_current_user
+from app.core.enums import AccountStatus
+from app.core.security import create_access_token
+from app.db.session import get_db
+from app.models import User
+from app.schemas.auth import CurrentUserResponse, LoginRequest, TokenResponse
+from app.services.auth_service import authenticate_user
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(prefix="/auth", tags=["auth"])
+@router.post(
+    "/signup",
+    response_model=UserSignupResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def signup(payload: UserSignup, db: Session = Depends(get_db)):
+    new_user = signup_user(db, payload)
+    return new_user
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-):
-    """
-    Login endpoint.
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    user = authenticate_user(db, payload.email, payload.password)
 
-    The database integration will be added after the user model
-    and database session are confirmed.
-    """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Login database integration is not implemented yet",
-    )
+    if user.account_status != AccountStatus.ACTIVE:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is not active")
+
+    token = create_access_token(subject=str(user.user_id))
+    return TokenResponse(access_token=token)
+
+
+@router.get("/me", response_model=CurrentUserResponse)
+def me(current_user: User = Depends(get_current_user)):
+    return current_user
