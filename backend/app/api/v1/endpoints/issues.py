@@ -1,14 +1,10 @@
 
 from uuid import uuid4
-from math import ceil
-from fastapi import Query
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.services.issue_service import  (
-    get_overall_issues,
-    get_my_issues,
-)
+
 from app.api.deps import get_current_user
 from app.core.enums import Role, AccountStatus
 from app.db.session import get_db
@@ -25,24 +21,6 @@ router = APIRouter(
     tags=["Issue Management"],
 )
 
-def build_paginated_response(issues, total, page, page_size):
-    total_pages = ceil(total / page_size) if total else 0
-
-    return {
-        "success": True,
-        "message": "Issues fetched successfully",
-        "data": {
-            "items": issues,
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_items": total,
-                "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_previous": page > 1 and total_pages > 0,
-            },
-        },
-    }
 
 # GET: Load active projects for the Report Issue dropdown
 @router.get(
@@ -53,11 +31,7 @@ def get_issue_projects(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = (
-        select(Project)
-        .order_by(Project.project_name.asc())
-    )
-
+    query = select(Project).order_by(Project.project_name.asc())
     return db.scalars(query).all()
 
 
@@ -81,63 +55,6 @@ def get_issue_developers(
 
     return db.scalars(query).all()
 
-# GET: Fetch all issues with pagination
-@router.get("/")
-def get_all_issues(
-    project_id: int | None = None,
-    issue_status: str | None = None,
-    issue_priority: str | None = None,
-    issue_type: str | None = None,
-    search: str | None = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    issues, total = get_overall_issues(
-        db=db,
-        project_id=project_id,
-        issue_status=issue_status,
-        issue_priority=issue_priority,
-        issue_type=issue_type,
-        search=search,
-        page=page,
-        page_size=page_size,
-    )
-
-    return build_paginated_response(
-        issues, total, page, page_size
-    )
-# GET: Fetch logged-in user's issues with pagination
-@router.get("/my")
-def get_my_issues_api(
-    project_id: int | None = None,
-    issue_status: str | None = None,
-    issue_priority: str | None = None,
-    issue_type: str | None = None,
-    search: str | None = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    issues, total = get_my_issues(
-        db=db,
-        user_id=current_user.user_id,
-        project_id=project_id,
-        issue_status=issue_status,
-        issue_priority=issue_priority,
-        issue_type=issue_type,
-        search=search,
-        page=page,
-        page_size=page_size,
-    )
-
-    return build_paginated_response(
-        issues, total, page, page_size
-    )    
-
-
 
 # POST: Create a new issue
 @router.post(
@@ -150,7 +67,6 @@ def create_issue(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Validate selected project
     project = db.get(Project, issue_data.project_id)
 
     if project is None:
@@ -159,7 +75,6 @@ def create_issue(
             detail="Selected project does not exist.",
         )
 
-    # Validate selected developer, if provided
     if issue_data.assigned_to is not None:
         developer = db.get(User, issue_data.assigned_to)
 
@@ -173,7 +88,6 @@ def create_issue(
                 detail="Selected developer is not active or valid.",
             )
 
-    # Generate a unique issue number
     issue_number = f"ISS-{uuid4().hex[:10].upper()}"
 
     new_issue = Issue(
