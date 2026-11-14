@@ -31,11 +31,7 @@ def get_issue_projects(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = (
-        select(Project)
-        .order_by(Project.project_name.asc())
-    )
-
+    query = select(Project).order_by(Project.project_name.asc())
     return db.scalars(query).all()
 
 
@@ -71,7 +67,6 @@ def create_issue(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Validate selected project
     project = db.get(Project, issue_data.project_id)
 
     if project is None:
@@ -80,7 +75,6 @@ def create_issue(
             detail="Selected project does not exist.",
         )
 
-    # Validate selected developer, if provided
     if issue_data.assigned_to is not None:
         developer = db.get(User, issue_data.assigned_to)
 
@@ -94,7 +88,6 @@ def create_issue(
                 detail="Selected developer is not active or valid.",
             )
 
-    # Generate a unique issue number
     issue_number = f"ISS-{uuid4().hex[:10].upper()}"
 
     new_issue = Issue(
