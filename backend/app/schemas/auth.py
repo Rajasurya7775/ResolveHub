@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr 
     password: str
     role: Optional[Literal["Support", "Developer"]] = None
 

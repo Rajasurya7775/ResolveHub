@@ -43,11 +43,29 @@ def get_current_user(
 
 
 def require_roles(*allowed_roles: str):
-    allowed = {str(r) for r in allowed_roles}
+    def normalize_role(role):
+        role = getattr(role, "value", role)
+        role = str(role).strip().upper()
+
+        # Support existing database role naming
+        role_aliases = {
+            "SUPPORT": "SUPPORTER",
+            "SUPPORTER": "SUPPORTER",
+        }
+
+        return role_aliases.get(role, role)
+
+    allowed = {normalize_role(role) for role in allowed_roles}
 
     def checker(current_user: User = Depends(get_current_user)) -> User:
-        if str(current_user.role) not in allowed:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not enough permissions")
+        user_role = normalize_role(current_user.role)
+
+        if user_role not in allowed:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Not enough permissions"
+            )
+
         return current_user
 
     return checker
