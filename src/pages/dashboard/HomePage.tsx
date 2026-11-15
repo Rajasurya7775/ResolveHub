@@ -82,11 +82,11 @@ export const HomePage: React.FC = () => {
       )}
 
       {/* ================= 1. ENLARGED TOP SECTION: WELCOME CARD & REPORT ISSUE BUTTON ================= */}
-      <div className="welcome-card-reference flex-shrink-0">
+      <div className="welcome-card-reference flex-shrink-">
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
           
           {/* Welcome Message with logged-in supporter's real identity */}
-          <div className="d-flex align-items-center gap-3.5">
+          <div className="d-flex align-items-center gap-4">
             <div className="welcome-icon-box">
               <i className="bi bi-laptop"></i>
             </div>
@@ -105,7 +105,7 @@ export const HomePage: React.FC = () => {
                 </span>
               </div>
               <p className="text-secondary mb-0" style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>
-                Supporter Incident Console — Track technical issues, monitor developer triage, and coordinate resolution across production lines.
+                Track issues, monitor triage, and coordinate resolution.
               </p>
             </div>
           </div>
@@ -114,7 +114,7 @@ export const HomePage: React.FC = () => {
           <div className="d-flex align-items-center gap-2">
             <button
               type="button"
-              className="btn btn-outline-secondary btn-sm px-3 py-2 d-inline-flex align-items-center gap-1.5 rounded-3 shadow-sm"
+              className="btn btn-outline-secondary btn-sm px-2 py-2 d-inline-flex align-items-center gap-1.5 rounded-3 shadow-sm"
               onClick={loadDashboardSummary}
               title="Refresh KPI metrics from backend API"
               disabled={summaryLoading}
@@ -125,7 +125,7 @@ export const HomePage: React.FC = () => {
 
             <button
               type="button"
-              className="btn btn-primary px-4 py-2.5 d-inline-flex align-items-center gap-2 rounded-3 shadow-sm fw-semibold"
+              className="btn btn-primary px-1 py-1 d-inline-flex align-items-center gap-2 rounded-3 shadow-sm fw-semibold"
               style={{ fontSize: '0.95rem', backgroundColor: '#0D6EFD', borderColor: '#0D6EFD' }}
               onClick={() => setIsReportModalOpen(true)}
             >

@@ -353,7 +353,9 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  min-width: 0;
+  width: 100%;
 }
 
 /* Chart Interactive Elements */
@@ -416,4 +418,33 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+}
+
+
+.insight-stats-footer {
+  width: 100%;
+  overflow: hidden;
+  padding: 10px 8px;
+}
+
+.insight-stats-footer > div {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  border-top: 1px solid #dee2e6;
+  padding: 10px 4px 0;
+}
+
+.insight-stats-footer > div > div {
+  flex: 1 1 0 !important;
+  min-width: 0;
+  white-space: nowrap !important;
+  font-size: 10px;
+  text-align: center;
+  justify-content: center;
+  overflow: hidden;
 }
