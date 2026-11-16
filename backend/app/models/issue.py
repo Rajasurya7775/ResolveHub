@@ -62,8 +62,6 @@ class Issue(Base):
     issue_status: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
-        default="OPEN",
-        server_default="OPEN",
     )
     issue_priority: Mapped[str | None] = mapped_column(
         String(30), nullable=True

@@ -8,6 +8,6 @@ services:
     volumes:
       - .:/app
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres123@host.docker.internal:5432/resolvehub_db
+      DATABASE_URL: postgresql+psycopg://admin:admin123@host.docker.internal:5432/mydatabase
       SECRET_KEY: local-development-secret-change-before-deployment
     restart: unless-stopped

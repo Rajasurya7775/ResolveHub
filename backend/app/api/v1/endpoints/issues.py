@@ -96,20 +96,20 @@ async def create_issue(
     issue_number = f"ISS-{uuid4().hex[:10].upper()}"
 
     new_issue = Issue(
-        issue_number=issue_number,
-        project_id=issue_data.project_id,
-        issue_shift=issue_data.issue_shift,
-        issue_time=issue_data.issue_time,
-        shift_date=issue_data.issue_time.date(),
-        issue_title=issue_data.issue_title,
-        issue_type=issue_data.issue_type,
-        issue_description=issue_data.issue_description,
-        rca=issue_data.rca,
-        issue_status="OPEN",
-        issue_priority=issue_data.issue_priority,
-        issue_created_by=current_user.user_id,
-        assigned_to=issue_data.assigned_to,
-    )
+    issue_number=issue_number,
+    project_id=issue_data.project_id,
+    issue_shift=issue_data.issue_shift,
+    issue_time=issue_data.issue_time,
+    shift_date=issue_data.issue_time.date(),
+    issue_title=issue_data.issue_title,
+    issue_type=issue_data.issue_type,
+    issue_description=issue_data.issue_description,
+    rca=issue_data.rca,
+    issue_status=issue_data.issue_status,
+    issue_priority=issue_data.issue_priority,
+    issue_created_by=current_user.user_id,
+    assigned_to=issue_data.assigned_to,
+)
 
     try:
         db.add(new_issue)
