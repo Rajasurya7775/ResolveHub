@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from uuid import UUID
 
@@ -58,3 +57,15 @@ class DeveloperDropdownResponse(BaseModel):
     employee_id: str
 
     model_config = ConfigDict(from_attributes=True)
+
+class IssueUpdate(BaseModel):
+    project_id: int | None = None
+    issue_shift: str | None = None
+    issue_time: datetime | None = None
+    issue_title: str | None = Field(default=None, min_length=1, max_length=255)
+    issue_type: str | None = None
+    issue_description: str | None = Field(default=None, min_length=1)
+    issue_priority: str | int | None = None
+    assigned_to: int | None = None
+    rca: str | None = None
+    issue_status: str | None = None

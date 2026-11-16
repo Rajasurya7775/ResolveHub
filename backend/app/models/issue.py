@@ -1,10 +1,9 @@
 
 import uuid
-from datetime import date,datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
-from app.models.audit_log import AuditLog
-from app.models.time_log import TimeLog
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, Uuid, func
+
+from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base

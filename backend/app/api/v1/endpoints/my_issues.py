@@ -1,6 +1,7 @@
 
 from datetime import date
-from math import ceil
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,8 +9,13 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import User, Project
 from app.schemas.my_issue import MyIssueResponse
-from app.schemas.issue import ProjectDropdownResponse
+from app.schemas.issue import ProjectDropdownResponse, IssueUpdate
 from app.services.my_issue_service import get_my_issues
+from app.services.issue_service import (
+    get_issue_details,
+    update_issue,
+    delete_issue,
+)
 from app.api.deps import get_current_user
 
 
@@ -61,20 +67,38 @@ def read_my_issues(
         page_size=page_size,
     )
 
-    total_pages = ceil(total / page_size) if total else 0
 
-    return {
-        "success": True,
-        "message": "Issues fetched successfully",
-        "data": {
-            "items": [MyIssueResponse.model_validate(issue) for issue in issues],
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_items": total,
-                "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_previous": page > 1 and total_pages > 0,
-            },
-        },
-    }
+# Get detailed issue when user clicks an issue
+@router.get("/{issue_id}", response_model=MyIssueResponse)
+def read_my_issue_details(
+    issue_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_issue_details(db, current_user, issue_id)
+
+
+# Update issue
+@router.patch("/{issue_id}", response_model=MyIssueResponse)
+def edit_my_issue(
+    issue_id: UUID,
+    issue_data: IssueUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return update_issue(
+        db=db,
+        current_user=current_user,
+        issue_id=issue_id,
+        update_data=issue_data.model_dump(exclude_unset=True),
+    )
+
+
+# Delete issue
+@router.delete("/{issue_id}")
+def remove_my_issue(
+    issue_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return delete_issue(db, current_user, issue_id)

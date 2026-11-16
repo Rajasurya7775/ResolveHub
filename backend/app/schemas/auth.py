@@ -1,13 +1,14 @@
-
-from typing import Literal, Optional
-
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class LoginRequest(BaseModel):
     email: EmailStr 
     password: str
-    role: Optional[Literal["Support", "Developer"]] = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class CurrentUserResponse(BaseModel):
@@ -19,9 +20,3 @@ class CurrentUserResponse(BaseModel):
     email: EmailStr
     role: str
     account_status: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    
