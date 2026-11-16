@@ -58,25 +58,36 @@ def issue_trends(
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=7)
-
+ 
     start_datetime = datetime.combine(week_start, time.min)
     end_datetime = datetime.combine(week_end, time.min)
-
-    # Count issues by issue_time and current status
+ 
+    # Count issues separately by status for each day
     results = (
         db.query(
             func.date(Issue.issue_time).label("issue_day"),
+ 
             func.sum(
                 case(
-                    (
-                        Issue.issue_status.in_(
-                            ["OPEN", "IN_PROGRESS", "HOLD"]
-                        ),
-                        1,
-                    ),
+                    (Issue.issue_status == "OPEN", 1),
                     else_=0,
                 )
             ).label("open_tickets"),
+ 
+            func.sum(
+                case(
+                    (Issue.issue_status == "IN_PROGRESS", 1),
+                    else_=0,
+                )
+            ).label("in_progress_tickets"),
+ 
+            func.sum(
+                case(
+                    (Issue.issue_status == "HOLD", 1),
+                    else_=0,
+                )
+            ).label("hold_tickets"),
+ 
             func.sum(
                 case(
                     (Issue.issue_status == "RESOLVED", 1),
@@ -92,65 +103,88 @@ def issue_trends(
         .group_by(func.date(Issue.issue_time))
         .all()
     )
-
+ 
     # Initialize all seven days with zero values
     daily_counts = {
         week_start + timedelta(days=i): {
             "open_tickets": 0,
+            "in_progress_tickets": 0,
+            "hold_tickets": 0,
             "resolved_tickets": 0,
         }
         for i in range(7)
     }
-
+ 
     # Fill in actual database counts
     for row in results:
         daily_counts[row.issue_day] = {
             "open_tickets": int(row.open_tickets or 0),
+            "in_progress_tickets": int(
+                row.in_progress_tickets or 0
+            ),
+            "hold_tickets": int(row.hold_tickets or 0),
             "resolved_tickets": int(row.resolved_tickets or 0),
         }
-
+ 
     # Prepare chart data
     labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
+ 
     open_tickets = [
         daily_counts[week_start + timedelta(days=i)]["open_tickets"]
         for i in range(7)
     ]
-
+ 
+    in_progress_tickets = [
+        daily_counts[week_start + timedelta(days=i)]["in_progress_tickets"]
+        for i in range(7)
+    ]
+ 
+    hold_tickets = [
+        daily_counts[week_start + timedelta(days=i)]["hold_tickets"]
+        for i in range(7)
+    ]
+ 
     resolved_tickets = [
         daily_counts[week_start + timedelta(days=i)]["resolved_tickets"]
         for i in range(7)
     ]
-
-    # 1. Peak Day
+ 
+    # 1. Peak Day (OPEN status only)
     peak_index = open_tickets.index(max(open_tickets))
     peak_day = labels[peak_index]
     peak_day_count = open_tickets[peak_index]
-
+ 
     # 2. Resolution Rate
-    total_open = sum(open_tickets)
+    total_open = (
+        sum(open_tickets)
+        + sum(in_progress_tickets)
+        + sum(hold_tickets)
+    )
+ 
     total_resolved = sum(resolved_tickets)
     total_logged = total_open + total_resolved
-
+ 
     resolution_rate = (
         round((total_resolved / total_logged) * 100, 2)
         if total_logged > 0
         else 0
     )
-
+ 
     # 3. Net Backlog Trend
     net_backlog = total_open - total_resolved
-
+ 
     if net_backlog > 0:
         backlog_direction = "increased"
     elif net_backlog < 0:
         backlog_direction = "decreased"
     else:
         backlog_direction = "unchanged"
-
+ 
     return {
         "labels": labels,
         "open_tickets": open_tickets,
+        "in_progress_tickets": in_progress_tickets,
+        "hold_tickets": hold_tickets,
         "resolved_tickets": resolved_tickets,
         "stats": {
             "peak_day": peak_day,
@@ -162,7 +196,6 @@ def issue_trends(
             "net_backlog_direction": backlog_direction,
         },
     }
-
 
 # --------------------------------------------------
 # ISSUE TYPE DISTRIBUTION - SUPPORTER ONLY

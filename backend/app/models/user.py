@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.models.issue import Issue
     from app.models.message import IssueMessage
     from app.models.project import Project
+    from app.models.time_log import TimeLog
 
 
 class User(Base):
@@ -54,4 +55,9 @@ class User(Base):
     # user_management 1 --- 0..* issue_messages_management ("sends")
     messages: Mapped[list["IssueMessage"]] = relationship(
         back_populates="sender",
+    )
+        # user_management 1 --- 0..* time_logs
+        
+    time_logs: Mapped[list["TimeLog"]] = relationship(
+        back_populates="user"
     )
