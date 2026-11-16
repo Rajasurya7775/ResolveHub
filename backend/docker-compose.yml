@@ -9,5 +9,5 @@ services:
       - .:/app
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres123@host.docker.internal:5432/resolvehub_db
-      SECRET_KEY: local-development-secret-change-before-deployment
+      SECRET_KEY: 481103fe87a1ffab16334d18d52a5286e2b371ea2a949d802ece1e6034feced4
     restart: unless-stopped
