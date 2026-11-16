@@ -1,8 +1,7 @@
-
 from datetime import date, datetime, time, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, or_
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Issue, Project, User
@@ -18,6 +17,8 @@ def get_my_issues(
     issue_status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ):
     # Validate date range
     if date_from and date_to and date_from > date_to:
@@ -100,7 +101,17 @@ def get_my_issues(
             Issue.issue_created_at < end_datetime
         )
 
-    # Newest issues first
-    query = query.order_by(Issue.issue_created_at.desc())
+    # Total count with the same filters (before limit/offset)
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
-    return db.scalars(query).unique().all()
+    # Paged results: newest first, with project loaded
+    paged_query = (
+        query.options(joinedload(Issue.project))
+        .order_by(Issue.issue_created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    issues = db.scalars(paged_query).unique().all()
+
+    return issues, total
