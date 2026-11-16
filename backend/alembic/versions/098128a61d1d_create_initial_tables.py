@@ -88,8 +88,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_issue_messages_management_issue_id'), 'issue_messages_management', ['issue_id'], unique=False)
     op.create_index(op.f('ix_issue_messages_management_sender_id'), 'issue_messages_management', ['sender_id'], unique=False)
-    op.drop_table('test_users')
-    # ### end Alembic commands ###
+        # ### end Alembic commands ###
 
 
 def downgrade() -> None:

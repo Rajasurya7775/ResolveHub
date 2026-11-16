@@ -1,8 +1,23 @@
+import random
+from faker import Faker
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.core.security import hash_password
 from app.models import User, Project, Issue, IssueMessage
+
+fake = Faker("en_IN")
+Faker.seed(42)       # same data on every run
+random.seed(42)
+
+COUNT = 10
+FAKE_PASSWORD = "Password@123"
+
+# Edit these to match your real enum values
+ISSUE_TYPES = ["BUG"]            # e.g. add "TASK", "FEATURE"
+ISSUE_STATUSES = ["OPEN"]        # e.g. add "IN_PROGRESS", "RESOLVED", "CLOSED"
+ISSUE_PRIORITIES = ["LOW", "MEDIUM", "HIGH"]
+PROJECT_STATUSES = ["ACTIVE"]
 
 
 def seed_database():
@@ -40,6 +55,20 @@ def seed_database():
             },
         ]
 
+        # Fake users (EMP004 onwards)
+        for i in range(COUNT):
+            users_data.append(
+                {
+                    "employee_id": f"EMP{i + 4:03d}",
+                    "full_name": fake.name(),
+                    "email": f"user{i + 4}@resolvehub.com",
+                    "password": FAKE_PASSWORD,
+                    "role": random.choice(["EMPLOYEE", "EMPLOYEE", "EMPLOYEE", "SUPPORTER"]),
+                    "role_type": "INTERNAL",
+                    "account_status": "ACTIVE",
+                }
+            )
+
         users = {}
 
         for data in users_data:
@@ -65,63 +94,133 @@ def seed_database():
 
             users[data["email"]] = user
 
-        # 2. Create project
-        project = db.query(Project).filter(
-            Project.project_name == "ResolveHub Backend"
-        ).first()
+        all_users = list(users.values())
+        employees = [u for u in all_users if u.role == "EMPLOYEE"]
+        supporters = [u for u in all_users if u.role == "SUPPORTER"]
 
-        if not project:
-            project = Project(
-                project_name="ResolveHub Backend",
-                project_description="ResolveHub issue management project",
-                project_status="ACTIVE",
-                created_by=users["admin@resolvehub.com"].user_id,
+        # 2. Create projects
+        projects_data = [
+            {
+                "project_name": "ResolveHub Backend",
+                "project_description": "ResolveHub issue management project",
+                "project_status": "ACTIVE",
+            }
+        ]
+
+        # Fake projects
+        for _ in range(COUNT):
+            suffix = random.choice(["Portal", "API", "Platform", "Service"])
+            projects_data.append(
+                {
+                    "project_name": f"{fake.unique.word().capitalize()} {suffix}",
+                    "project_description": fake.sentence(nb_words=10),
+                    "project_status": random.choice(PROJECT_STATUSES),
+                }
             )
-            db.add(project)
-            db.flush()
-            print("Created project: ResolveHub Backend")
-        else:
-            print("Project already exists")
 
-        # 3. Create sample issue
-        issue = db.query(Issue).filter(
-            Issue.issue_number == "RES-1001"
-        ).first()
+        projects = []
 
-        if not issue:
-            issue = Issue(
-                issue_number="RES-1001",
-                project_id=project.project_id,
-                issue_title="Login authentication issue",
-                issue_type="BUG",
-                issue_description="Unable to log in using valid credentials.",
-                issue_status="OPEN",
-                issue_priority="HIGH",
-                issue_created_by=users["employee@resolvehub.com"].user_id,
-                assigned_to=users["supporter@resolvehub.com"].user_id,
+        for data in projects_data:
+            project = db.query(Project).filter(
+                Project.project_name == data["project_name"]
+            ).first()
+
+            if not project:
+                project = Project(
+                    project_name=data["project_name"],
+                    project_description=data["project_description"],
+                    project_status=data["project_status"],
+                    created_by=users["admin@resolvehub.com"].user_id,
+                )
+                db.add(project)
+                db.flush()
+                print(f"Created project: {project.project_name}")
+            else:
+                print(f"Project already exists: {project.project_name}")
+
+            projects.append(project)
+
+        # 3. Create issues
+        issues_data = [
+            {
+                "issue_number": "RES-1001",
+                "project": projects[0],
+                "issue_title": "Login authentication issue",
+                "issue_type": "BUG",
+                "issue_description": "Unable to log in using valid credentials.",
+                "issue_status": "OPEN",
+                "issue_priority": "HIGH",
+                "created_by": users["employee@resolvehub.com"],
+                "assigned_to": users["supporter@resolvehub.com"],
+            }
+        ]
+
+        # Fake issues
+        for i in range(COUNT):
+            issues_data.append(
+                {
+                    "issue_number": f"RES-{1002 + i}",
+                    "project": random.choice(projects),
+                    "issue_title": fake.sentence(nb_words=6).rstrip("."),
+                    "issue_type": random.choice(ISSUE_TYPES),
+                    "issue_description": fake.paragraph(nb_sentences=3),
+                    "issue_status": random.choice(ISSUE_STATUSES),
+                    "issue_priority": random.choice(ISSUE_PRIORITIES),
+                    "created_by": random.choice(employees),
+                    "assigned_to": random.choice(supporters),
+                }
             )
-            db.add(issue)
-            db.flush()
-            print("Created issue: RES-1001")
-        else:
-            print("Issue already exists: RES-1001")
 
-        # 4. Create issue message
-        message = db.query(IssueMessage).filter(
-            IssueMessage.issue_id == issue.issue_id,
-            IssueMessage.sender_id == users["supporter@resolvehub.com"].user_id,
-        ).first()
+        issues = []
 
-        if not message:
-            message = IssueMessage(
-                issue_id=issue.issue_id,
-                sender_id=users["supporter@resolvehub.com"].user_id,
-                markdown="We are investigating this login issue.",
-            )
-            db.add(message)
-            print("Created issue message")
-        else:
-            print("Issue message already exists")
+        for data in issues_data:
+            issue = db.query(Issue).filter(
+                Issue.issue_number == data["issue_number"]
+            ).first()
+
+            if not issue:
+                issue = Issue(
+                    issue_number=data["issue_number"],
+                    project_id=data["project"].project_id,
+                    issue_title=data["issue_title"],
+                    issue_type=data["issue_type"],
+                    issue_description=data["issue_description"],
+                    issue_status=data["issue_status"],
+                    issue_priority=data["issue_priority"],
+                    issue_created_by=data["created_by"].user_id,
+                    assigned_to=data["assigned_to"].user_id,
+                )
+                db.add(issue)
+                db.flush()
+                print(f"Created issue: {issue.issue_number}")
+            else:
+                print(f"Issue already exists: {issue.issue_number}")
+
+            issues.append(issue)
+
+        # 4. Create issue messages
+        for issue in issues:
+            message = db.query(IssueMessage).filter(
+                IssueMessage.issue_id == issue.issue_id,
+                IssueMessage.sender_id == issue.assigned_to,
+            ).first()
+
+            if not message:
+                text = (
+                    "We are investigating this login issue."
+                    if issue.issue_number == "RES-1001"
+                    else fake.paragraph(nb_sentences=2)
+                )
+                db.add(
+                    IssueMessage(
+                        issue_id=issue.issue_id,
+                        sender_id=issue.assigned_to,
+                        markdown=text,
+                    )
+                )
+                print(f"Created issue message for {issue.issue_number}")
+            else:
+                print(f"Issue message already exists for {issue.issue_number}")
 
         db.commit()
         print("\nDatabase seeding completed successfully!")
