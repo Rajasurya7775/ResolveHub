@@ -8,7 +8,18 @@ import { LoginHeroGraphic } from '../../components/auth/LoginHeroGraphic';
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedRole, setSelectedRole, login } = useAuth();
+  const { selectedRole, setSelectedRole, login, isAuthenticated, currentUser } = useAuth();
+
+  React.useEffect(() => {
+    if (isAuthenticated && currentUser) {
+      const isDev = String(currentUser.role || '').toLowerCase().includes('dev');
+      if (isDev) {
+        navigate('/developer/home', { replace: true });
+      } else {
+        navigate('/support/home', { replace: true });
+      }
+    }
+  }, [isAuthenticated, currentUser, navigate]);
 
   const stateMsg = (location.state as any)?.message;
   const prefillId = (location.state as any)?.registeredId || (location.state as any)?.registeredEmail || '';
@@ -49,10 +60,11 @@ export const LoginPage: React.FC = () => {
       if (result.success) {
         // Navigate based on the authenticated user's role returned by the backend
         const userRole = result.user?.role || selectedRole;
-        if (userRole === 'Developer') {
-          navigate('/developer');
+        const isDev = String(userRole || '').toLowerCase().includes('dev');
+        if (isDev) {
+          navigate('/developer/home');
         } else {
-          navigate('/home');
+          navigate('/support/home');
         }
       } else {
         setErrorMsg(result.message || 'Authentication failed. Please verify your credentials.');

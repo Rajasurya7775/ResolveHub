@@ -1,220 +1,334 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { BrandLogo } from '../../components/common/BrandLogo';
-import { getCurrentShift } from '../../utils/shiftUtils';
+import { useIssues } from '../../context/IssueContext';
+import { ReportIssueModal } from '../../components/issues/ReportIssueModal';
+import { HomeInsights } from '../../components/dashboard/HomeInsights';
+import {
+  apiFetchDeveloperSummary,
+  DeveloperDashboardSummary
+} from '../../services/api/dashboardService';
+import { Issue } from '../../types/issue';
 
 export const DeveloperDashboard: React.FC = () => {
-  const { currentUser, logout, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const { issues, previousIssues, myIssues, refreshIssues } = useIssues();
 
-  // Live timestamp
-  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [summary, setSummary] = useState<DeveloperDashboardSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // Helper to check if issue is assigned to the authenticated developer
+  const isAssignedToCurrentDev = useCallback(
+    (issue: Issue): boolean => {
+      if (!currentUser) return false;
+      const devName = (currentUser.name || '').trim().toLowerCase();
+      const devId = (currentUser.employeeId || '').trim().toLowerCase();
+
+      const accName = (issue.acceptedDeveloper || '').trim().toLowerCase();
+      const accId = (issue.acceptedDeveloperId || '').trim().toLowerCase();
+      const assName = (issue.assignedTo || '').trim().toLowerCase();
+      const assId = (issue.assignedToId || '').trim().toLowerCase();
+
+      return (
+        (devName.length > 0 && (accName === devName || assName === devName)) ||
+        (devId.length > 0 && (accId === devId || assId === devId))
+      );
+    },
+    [currentUser]
+  );
+
+  // Combined pool of all live accessible issues
+  const allAccessibleIssues = React.useMemo(() => {
+    const map = new Map<string, Issue>();
+    [...issues, ...myIssues, ...previousIssues].forEach((item) => {
+      if (item && item.id) {
+        map.set(item.id, item);
+      }
+    });
+    return Array.from(map.values());
+  }, [issues, myIssues, previousIssues]);
+
+  // Dynamic KPI aggregation from live issues if backend summary is pending
+  const assignedList = React.useMemo(() => {
+    return allAccessibleIssues.filter(isAssignedToCurrentDev);
+  }, [allAccessibleIssues, isAssignedToCurrentDev]);
+
+  const fallbackTotal = allAccessibleIssues.length;
+  const fallbackAssigned = assignedList.length;
+  const fallbackInProgress = assignedList.filter(
+    (i) => i.status === 'In progress' || i.status === 'In Progress'
+  ).length;
+  const fallbackPending = assignedList.filter(
+    (i) =>
+      i.status === 'Pending' ||
+      i.status === 'On Hold' ||
+      i.status === 'Open' ||
+      (i.status as string) === 'Hold'
+  ).length;
+
+  // 1. Fetch Developer KPI Summary from Backend API
+  const loadSummary = useCallback(async () => {
+    if (!currentUser) return;
+    setSummaryLoading(true);
+    setSummaryError(null);
+
+    const res = await apiFetchDeveloperSummary(currentUser.employeeId, currentUser.name);
+    if (res.success && res.data) {
+      setSummary(res.data);
+    } else {
+      setSummaryError(res.message || null);
+    }
+    setSummaryLoading(false);
+  }, [currentUser]);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    loadSummary();
+  }, [loadSummary]);
 
-  const shiftInfo = getCurrentShift(currentTime);
-  const formattedDate = currentTime.toLocaleDateString('en-US', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric'
-  });
-  const formattedTime = currentTime.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  });
+  // Final KPI values (prioritize live backend API summary, gracefully aggregate live tickets)
+  const totalIssuesCount = summary && summary.totalIssues > 0 ? summary.totalIssues : fallbackTotal;
+  const assignedIssuesCount = summary && summary.assignedIssues > 0 ? summary.assignedIssues : fallbackAssigned;
+  const inProgressCount = summary && summary.inProgressCount > 0 ? summary.inProgressCount : fallbackInProgress;
+  const pendingCount = summary && summary.pendingCount > 0 ? summary.pendingCount : fallbackPending;
 
-  // Route protection
-  if (!isAuthenticated || !currentUser) {
-    navigate('/login');
-    return null;
-  }
-
-  // Support users cannot access Developer console
-  if (currentUser.role === 'Support' || currentUser.role === 'Supporter') {
-    navigate('/home');
-    return null;
-  }
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleIssueCreated = (issueId: string) => {
+    setIsReportModalOpen(false);
+    setSuccessToast(`Incident ticket ${issueId} created successfully!`);
+    loadSummary();
+    refreshIssues();
+    setTimeout(() => setSuccessToast(null), 3500);
   };
 
   return (
-    <div className="min-vh-100 d-flex flex-column bg-light">
-      {/* Top Navbar */}
-      <header className="bg-white border-bottom px-4 py-2.5 d-flex align-items-center justify-content-between shadow-sm flex-shrink-0">
-        <div className="d-flex align-items-center gap-3">
-          <BrandLogo size="md" />
-          <span className="badge bg-primary-subtle text-primary border border-primary-subtle px-2.5 py-1 rounded-pill fw-semibold small">
-            Developer Workspace
-          </span>
-        </div>
-
-        {/* Center: Shift, Date & Live Time Widget */}
-        <div className="d-none d-md-flex align-items-center gap-2 gap-md-3 px-3 py-1.5 rounded-pill bg-light border border-light-subtle shadow-xs">
-          <span className="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle px-2.5 py-1 fw-semibold d-inline-flex align-items-center gap-1.5" style={{ fontSize: '0.78rem' }}>
-            <span className="rounded-circle bg-primary" style={{ width: '6px', height: '6px' }}></span>
-            <span>{shiftInfo.shift}</span>
-          </span>
-          <div className="vr text-muted" style={{ height: '14px', opacity: 0.35 }}></div>
-          <div className="text-secondary small fw-medium" style={{ fontSize: '0.8rem' }}>
-            <i className="bi bi-calendar3 text-muted me-1"></i>
-            <span className="text-navy">{formattedDate}</span>
-          </div>
-          <div className="vr text-muted" style={{ height: '14px', opacity: 0.35 }}></div>
-          <div className="text-navy font-monospace fw-bold small" style={{ fontSize: '0.82rem' }}>
-            <i className="bi bi-clock text-primary me-1"></i>
-            <span>{formattedTime}</span>
-          </div>
-        </div>
-
-        <div className="d-flex align-items-center gap-3">
+    <div className="d-flex flex-column h-100 min-h-0" style={{ gap: '0.85rem' }}>
+      
+      {/* Floating Toast Alert */}
+      {successToast && (
+        <div
+          className="alert alert-success py-2 px-3.5 rounded-3 shadow-sm small d-flex align-items-center justify-content-between position-fixed top-0 start-50 translate-middle-x mt-3"
+          style={{ zIndex: 1060, minWidth: '320px', maxWidth: '90vw' }}
+        >
           <div className="d-flex align-items-center gap-2">
-            <div
-              className="rounded-circle bg-dark text-white d-flex align-items-center justify-content-center fw-bold"
-              style={{ width: '36px', height: '36px', fontSize: '0.9rem' }}
-            >
-              {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'D'}
-            </div>
-            <div className="text-start d-none d-sm-block">
-              <div className="fw-bold text-navy small lh-1">{currentUser.name || 'Developer'}</div>
-              <div className="text-muted" style={{ fontSize: '0.72rem' }}>
-                {currentUser.employeeId} &bull; {currentUser.roleType || 'Engineer'}
-              </div>
-            </div>
+            <i className="bi bi-check-circle-fill text-success fs-5"></i>
+            <span className="fw-semibold">{successToast}</span>
           </div>
-
           <button
             type="button"
-            className="btn btn-outline-danger btn-sm rounded-3 px-3 d-flex align-items-center gap-1.5"
-            onClick={handleLogout}
-          >
-            <i className="bi bi-box-arrow-right"></i>
-            <span>Log Out</span>
+            className="btn-close btn-close-sm ms-2"
+            onClick={() => setSuccessToast(null)}
+          />
+        </div>
+      )}
+
+      {/* ================= 1. WELCOME SECTION (MATCHING SUPPORTER HOME DASHBOARD) ================= */}
+      <div className="welcome-card-reference flex-shrink-0">
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
+          
+          {/* Welcome Message with logged-in developer's identity */}
+          <div className="d-flex align-items-center gap-3.5">
+            <div className="welcome-icon-box">
+              <i className="bi bi-code-slash"></i>
+            </div>
+            <div>
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <h4 className="fw-bold text-navy mb-0" style={{ fontSize: '1.5rem', letterSpacing: '-0.4px' }}>
+                  Welcome, {currentUser?.name || 'Developer'}!
+                </h4>
+                {currentUser?.employeeId && (
+                  <span
+                    className="badge bg-primary-subtle text-primary rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5"
+                    style={{ fontSize: '0.78rem' }}
+                  >
+                    <i className="bi bi-person-badge"></i> {currentUser.employeeId}
+                  </span>
+                )}
+                {currentUser?.roleType && (
+                  <span
+                    className="badge bg-info-subtle text-info-emphasis rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5"
+                    style={{ fontSize: '0.78rem' }}
+                  >
+                    <i className="bi bi-diagram-3"></i> {currentUser.roleType}
+                  </span>
+                )}
+                <span
+                  className="badge bg-success-subtle text-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5"
+                  style={{ fontSize: '0.78rem' }}
+                >
+                  <i className="bi bi-check-circle-fill"></i> Active Session
+                </span>
+              </div>
+              <p className="text-secondary mb-0" style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>
+                Developer Workspace — Manage assigned issues, track progress, and resolve technical issues efficiently.
+              </p>
+            </div>
+          </div>
+
+          {/* Action Row */}
+          <div className="d-flex align-items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm px-3 py-2 d-inline-flex align-items-center gap-1.5 rounded-3 shadow-sm"
+              onClick={loadSummary}
+              title="Refresh KPI metrics from backend API"
+              disabled={summaryLoading}
+            >
+              <i className={`bi bi-arrow-clockwise ${summaryLoading ? 'spinner-border spinner-border-sm' : ''}`}></i>
+              <span className="d-none d-sm-inline">Refresh KPIs</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-primary px-4 py-2.5 d-inline-flex align-items-center gap-2 rounded-3 shadow-sm fw-semibold"
+              style={{ fontSize: '0.95rem', backgroundColor: '#0D6EFD', borderColor: '#0D6EFD' }}
+              onClick={() => setIsReportModalOpen(true)}
+            >
+              <i className="bi bi-plus-circle-fill fs-5"></i>
+              <span>Create New Issue</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Backend Notice if API is down */}
+      {summaryError && (
+        <div className="alert alert-warning py-1.5 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-0 flex-shrink-0">
+          <div className="d-flex align-items-center gap-2">
+            <i className="bi bi-exclamation-triangle-fill text-warning fs-6"></i>
+            <span>{summaryError} (Displaying live ticket metrics)</span>
+          </div>
+          <button className="btn btn-sm btn-outline-dark py-0 px-2" onClick={loadSummary}>
+            Retry API
           </button>
         </div>
-      </header>
+      )}
 
-      {/* Main Content Area */}
-      <main className="flex-grow-1 p-4 container-xl my-auto">
-        <div className="row justify-content-center">
-          <div className="col-12 col-lg-10 col-xl-8">
-            
-            {/* Work in Progress Hero Banner */}
-            <div className="card border-0 shadow-sm rounded-4 p-4 p-md-5 text-center mb-4 bg-white position-relative overflow-hidden">
-              <div
-                className="position-absolute top-0 start-0 w-100"
-                style={{ height: '4px', background: 'linear-gradient(90deg, #0D6EFD, #6610f2, #0dcaf0)' }}
-              />
-
-              <div className="mb-3">
-                <div
-                  className="rounded-circle bg-warning-subtle text-warning d-inline-flex align-items-center justify-content-center mb-3"
-                  style={{ width: '72px', height: '72px' }}
-                >
-                  <i className="bi bi-cone-striped fs-1 text-warning"></i>
-                </div>
-                <div className="d-inline-block d-block mb-1">
-                  <span className="badge bg-warning text-dark px-3 py-1 rounded-pill fw-semibold">
-                    MODULE IN PROGRESS
-                  </span>
-                </div>
-                <h2 className="fw-bold text-navy mb-2" style={{ fontSize: '2rem' }}>
-                  Developer Console
-                </h2>
-                <p className="text-secondary mx-auto mb-4" style={{ maxWidth: '520px', fontSize: '0.96rem' }}>
-                  The Developer incident resolution and code triage console is currently under active development. You are logged in with verified Developer authorization.
-                </p>
-              </div>
-
-              {/* Developer Profile Card */}
-              <div className="bg-light rounded-3 p-3.5 text-start border mb-4">
-                <div className="fw-bold text-navy mb-2.5 d-flex align-items-center gap-2 small">
-                  <i className="bi bi-person-badge-fill text-primary"></i>
-                  AUTHENTICATED DEVELOPER SESSION
-                </div>
-                <div className="row g-3">
-                  <div className="col-12 col-sm-6 col-md-3">
-                    <span className="text-muted d-block small" style={{ fontSize: '0.72rem' }}>DEVELOPER NAME</span>
-                    <strong className="text-navy">{currentUser.name}</strong>
-                  </div>
-                  <div className="col-12 col-sm-6 col-md-3">
-                    <span className="text-muted d-block small" style={{ fontSize: '0.72rem' }}>EMPLOYEE ID</span>
-                    <span className="badge bg-secondary-subtle text-secondary-emphasis">{currentUser.employeeId}</span>
-                  </div>
-                  <div className="col-12 col-sm-6 col-md-3">
-                    <span className="text-muted d-block small" style={{ fontSize: '0.72rem' }}>ROLE TYPE</span>
-                    <span className="badge bg-primary-subtle text-primary">{currentUser.roleType || 'Developer'}</span>
-                  </div>
-                  <div className="col-12 col-sm-6 col-md-3">
-                    <span className="text-muted d-block small" style={{ fontSize: '0.72rem' }}>SYSTEM ROLE</span>
-                    <span className="badge bg-success-subtle text-success">{currentUser.role}</span>
-                  </div>
-                  <div className="col-12 col-sm-6">
-                    <span className="text-muted d-block small" style={{ fontSize: '0.72rem' }}>EMAIL ADDRESS</span>
-                    <span className="text-navy small">{currentUser.email}</span>
-                  </div>
-                  <div className="col-12 col-sm-6">
-                    <span className="text-muted d-block small" style={{ fontSize: '0.72rem' }}>ACCOUNT STATUS</span>
-                    <span className="badge bg-success-subtle text-success">{currentUser.accountStatus || 'Active'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Upcoming Developer Capabilities Preview */}
-              <div className="row g-3 text-start">
-                <div className="col-12 col-md-4">
-                  <div className="p-3 rounded-3 border bg-white h-100">
-                    <div className="text-primary mb-2">
-                      <i className="bi bi-bug fs-4"></i>
-                    </div>
-                    <h6 className="fw-bold text-navy mb-1" style={{ fontSize: '0.9rem' }}>Issue Triage Queue</h6>
-                    <p className="text-muted small mb-0" style={{ fontSize: '0.78rem' }}>
-                      Accept assigned production issues, analyze logs, and coordinate fixes with shift supporters.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="col-12 col-md-4">
-                  <div className="p-3 rounded-3 border bg-white h-100">
-                    <div className="text-success mb-2">
-                      <i className="bi bi-file-earmark-diff fs-4"></i>
-                    </div>
-                    <h6 className="fw-bold text-navy mb-1" style={{ fontSize: '0.9rem' }}>RCA Documentation</h6>
-                    <p className="text-muted small mb-0" style={{ fontSize: '0.78rem' }}>
-                      Publish Root Cause Analysis, resolution notes, and bug hotfix documentation directly to the repository.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="col-12 col-md-4">
-                  <div className="p-3 rounded-3 border bg-white h-100">
-                    <div className="text-purple mb-2">
-                      <i className="bi bi-chat-left-dots fs-4" style={{ color: '#8B5CF6' }}></i>
-                    </div>
-                    <h6 className="fw-bold text-navy mb-1" style={{ fontSize: '0.9rem' }}>Direct Supporter Chat</h6>
-                    <p className="text-muted small mb-0" style={{ fontSize: '0.78rem' }}>
-                      Real-time discussion threads with shift engineers to verify production errors and reproduction steps.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
+      {/* ================= 2. FOUR DEVELOPER KPI CARDS IN ONE ROW ================= */}
+      <div className="row g-3 flex-shrink-0">
+        
+        {/* Card 1 – Total Issues */}
+        <div className="col-6 col-xl-3">
+          <div className="kpi-card-reference">
+            <div
+              className="kpi-icon-badge"
+              style={{ backgroundColor: 'rgba(13, 110, 253, 0.1)', color: '#0D6EFD' }}
+            >
+              <i className="bi bi-stack"></i>
             </div>
-
+            <div>
+              <span
+                className="text-muted fw-semibold d-block text-uppercase"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.5px' }}
+              >
+                Total Issues
+              </span>
+              <h4 className="fw-bold text-navy mb-0 mt-0.5" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
+                {totalIssuesCount}
+              </h4>
+              <small className="text-secondary" style={{ fontSize: '0.72rem' }}>
+                Total issues
+              </small>
+            </div>
           </div>
         </div>
-      </main>
+
+        {/* Card 2 – Assigned Issues */}
+        <div className="col-6 col-xl-3">
+          <div className="kpi-card-reference">
+            <div
+              className="kpi-icon-badge"
+              style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10B981' }}
+            >
+              <i className="bi bi-person-check"></i>
+            </div>
+            <div>
+              <span
+                className="text-muted fw-semibold d-block text-uppercase"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.5px' }}
+              >
+                Assigned Issues
+              </span>
+              <h4 className="fw-bold text-navy mb-0 mt-0.5" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
+                <span className="text-success">{assignedIssuesCount}</span>
+              </h4>
+              <small className="text-success" style={{ fontSize: '0.72rem' }}>
+                Assigned to me
+              </small>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3 – In Progress */}
+        <div className="col-6 col-xl-3">
+          <div className="kpi-card-reference">
+            <div
+              className="kpi-icon-badge"
+              style={{ backgroundColor: '#F3E8FF', color: '#8B5CF6' }}
+            >
+              <i className="bi bi-hourglass-split"></i>
+            </div>
+            <div>
+              <span
+                className="text-muted fw-semibold d-block text-uppercase"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.5px' }}
+              >
+                In Progress
+              </span>
+              <h4 className="fw-bold mb-0 mt-0.5" style={{ fontSize: '1.5rem', color: '#8B5CF6', letterSpacing: '-0.3px' }}>
+                {inProgressCount}
+              </h4>
+              <small className="text-secondary" style={{ fontSize: '0.72rem' }}>
+                Currently working
+              </small>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4 – Pending Issues */}
+        <div className="col-6 col-xl-3">
+          <div className="kpi-card-reference">
+            <div
+              className="kpi-icon-badge"
+              style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}
+            >
+              <i className="bi bi-pause-circle"></i>
+            </div>
+            <div>
+              <span
+                className="text-muted fw-semibold d-block text-uppercase"
+                style={{ fontSize: '0.68rem', letterSpacing: '0.5px' }}
+              >
+                Pending Issues
+              </span>
+              <h4 className="fw-bold text-navy mb-0 mt-0.5" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
+                <span className="text-warning">{pendingCount}</span>
+              </h4>
+              <small className="text-secondary" style={{ fontSize: '0.72rem' }}>
+                Awaiting action
+              </small>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ================= 3. GRAPHS & ANALYTICS (EXACT MATCH WITH SUPPORTER DASHBOARD) ================= */}
+      <div className="flex-grow-1 min-h-0 d-flex flex-column" style={{ minHeight: '280px' }}>
+        <HomeInsights />
+      </div>
+
+      {/* Create New Issue Modal Popup */}
+      {isReportModalOpen && (
+        <ReportIssueModal
+          onClose={() => setIsReportModalOpen(false)}
+          onSuccess={handleIssueCreated}
+        />
+      )}
+
     </div>
   );
 };
-export default DeveloperDashboard;
 
+export default DeveloperDashboard;

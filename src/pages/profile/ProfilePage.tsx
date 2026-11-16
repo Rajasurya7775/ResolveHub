@@ -28,12 +28,14 @@ export const ProfilePage: React.FC = () => {
   };
 
   return (
-    <div className="d-flex flex-column h-100 overflow-hidden" style={{ maxWidth: '850px' }}>
+    <div className="d-flex flex-column h-100 mx-auto w-100 py-1" style={{ maxWidth: '850px' }}>
       
       {/* Title */}
       <div className="d-flex align-items-center justify-content-between mb-3 flex-shrink-0">
         <div>
-          <h5 className="fw-bold text-navy mb-0">Supporter Profile</h5>
+          <h5 className="fw-bold text-navy mb-0">
+            {currentUser?.role === 'Developer' ? 'Developer Profile' : 'Support Profile'}
+          </h5>
           <small className="text-secondary">Personal account and operational shift identity</small>
         </div>
 

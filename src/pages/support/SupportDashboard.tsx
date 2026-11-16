@@ -5,7 +5,7 @@ import { HomeInsights } from '../../components/dashboard/HomeInsights';
 import { ReportIssueModal } from '../../components/issues/ReportIssueModal';
 import { apiFetchDashboardSummary, DashboardSummary } from '../../services/api/dashboardService';
 
-export const HomePage: React.FC = () => {
+export const SupportDashboard: React.FC = () => {
   const { currentUser } = useAuth();
   const { issues, refreshIssues } = useIssues();
 
@@ -61,7 +61,7 @@ export const HomePage: React.FC = () => {
   };
 
   return (
-    <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '1rem' }}>
+    <div className="d-flex flex-column h-100 min-h-0" style={{ gap: '0.85rem' }}>
       
       {/* Floating Toast Alert */}
       {successToast && (
@@ -219,8 +219,8 @@ export const HomePage: React.FC = () => {
 
       </div>
 
-      {/* ================= 3. TWO GRAPHS ONLY: LINE CHART & HISTOGRAM (STRICTLY NON-SCROLLABLE) ================= */}
-      <div className="flex-grow-1 min-h-0 overflow-hidden d-flex flex-column">
+      {/* ================= 3. TWO GRAPHS ONLY: LINE CHART & HISTOGRAM ================= */}
+      <div className="flex-grow-1 min-h-0 d-flex flex-column" style={{ minHeight: '280px' }}>
         <HomeInsights />
       </div>
 
@@ -235,3 +235,8 @@ export const HomePage: React.FC = () => {
     </div>
   );
 };
+
+// Aliases for compatibility
+export const HomePage = SupportDashboard;
+export default SupportDashboard;
+

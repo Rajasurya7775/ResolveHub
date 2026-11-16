@@ -13,16 +13,31 @@ export const DashboardLayout: React.FC = () => {
     return <Navigate to="/login" replace />;
   }
 
-  // Role-based authorization: Developers must only access Developer dashboard
-  if (currentUser?.role === 'Developer') {
-    return <Navigate to="/developer" replace />;
+  // Role-based authorization:
+  // If Developer visits Supporter-only routes, redirect to Developer dashboard
+  const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
+  const supporterOnlyPaths = ['/support', '/home', '/dashboard', '/issues/my', '/issues/previous', '/issues/new', '/issues/report'];
+  const developerOnlyPaths = ['/developer'];
+
+  if (isDev && supporterOnlyPaths.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
+    return <Navigate to="/developer/home" replace />;
+  }
+
+  // If Supporter visits Developer-only routes, redirect to Supporter home
+  if (!isDev && developerOnlyPaths.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
+    return <Navigate to="/support/home" replace />;
   }
 
   const getPageTitle = (path: string): string => {
-    if (path.includes('/home') || path.includes('/dashboard')) return 'Home';
+    if (path === '/developer' || path === '/developer/' || path === '/developer/home' || path === '/support' || path === '/support/' || path === '/support/home' || path === '/home' || path === '/dashboard') {
+      return 'Home';
+    }
+    if (path.includes('/developer/assigned')) return 'Assigned Issues';
+    if (path.includes('/developer/all')) return 'All Issues';
+    if (path.includes('/support/my-issues') || path.includes('/issues/my')) return 'My Issues';
+    if (path.includes('/support/previous-issues') || path.includes('/issues/previous')) return 'Previous Issues';
     if (path.includes('/issues/new') || path.includes('/issues/report')) return 'Report New Issue';
-    if (path.includes('/issues/my') || path.includes('/issues/all')) return 'My Issues';
-    if (path.includes('/issues/previous')) return 'Previous Issues';
+    if (path.startsWith('/issues/')) return 'Issue Details';
     if (path.includes('/profile')) return 'Profile';
     return 'Home';
   };

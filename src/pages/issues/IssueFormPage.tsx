@@ -213,11 +213,13 @@ export const IssueFormPage: React.FC = () => {
   };
 
   return (
-    <div className="container-fluid px-0" style={{ maxWidth: '900px' }}>
+    <div className="container-fluid px-0 py-2 mx-auto" style={{ maxWidth: '900px' }}>
       
       {/* Page Heading */}
-      <div className="mb-4">
-        <h4 className="fw-bold text-navy mb-1">Create Technical Incident</h4>
+      <div className="mb-3.5">
+        <h4 className="fw-bold text-navy mb-1" style={{ fontSize: '1.35rem', letterSpacing: '-0.3px' }}>
+          Create Technical Incident
+        </h4>
         <p className="text-secondary small mb-0">
           Logged-in Supporter: <strong className="text-navy">{currentUser?.name || 'Supporter'}</strong> ({currentUser?.employeeId || 'EMP'})
         </p>

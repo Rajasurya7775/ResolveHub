@@ -1,17 +1,39 @@
-import React, { useState, useMemo } from 'react';
-import { useIssues } from '../../context/IssueContext';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useIssues } from '../../context/IssueContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
-import { IssueDetailsModal } from './IssueDetailsModal';
+import { Pagination } from '../../components/common/Pagination';
 import { Issue } from '../../types/issue';
-import { ShiftType } from '../../types/user';
 import { exportIssuesToCsv } from '../../utils/exportUtils';
+import { apiFetchPreviousIssuesProjects } from '../../services/api/issueService';
 
-export const MyIssuesPage: React.FC = () => {
-  const { myIssues, deleteIssue, isLoading, myIssuesError, refreshMyIssues } = useIssues();
+export const DeveloperAllIssuesPage: React.FC = () => {
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const { issues, previousIssues, myIssues, isLoading, refreshIssues } = useIssues();
 
-  // The 6 Specified Filters:
+  // Dynamic projects
+  const [projectOptions, setProjectOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    apiFetchPreviousIssuesProjects().then((res) => {
+      if (isMounted && res.success && res.data.length > 0) {
+        setProjectOptions(res.data);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Always refresh on mount
+  useEffect(() => {
+    refreshIssues();
+  }, [refreshIssues]);
+
+  // The 6 Filters:
   // 1. Issue ID / Title
   const [searchTerm, setSearchTerm] = useState('');
   // 2. Project
@@ -25,44 +47,42 @@ export const MyIssuesPage: React.FC = () => {
   // 6. Status
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
-  // Selected Issue for Modal
-  const [activeModalIssue, setActiveModalIssue] = useState<Issue | null>(null);
-
-  // Pagination
+  // Pagination (10 per page)
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 6;
+  const itemsPerPage = 10;
 
-  // Combined Filters Logic on live issues from /my-issues/
+  // Combine all accessible issues across lists
+  const allIssues = useMemo(() => {
+    const map = new Map<string, Issue>();
+    [...issues, ...myIssues, ...previousIssues].forEach((item) => {
+      if (item && item.id) {
+        map.set(item.id, item);
+      }
+    });
+    return Array.from(map.values());
+  }, [issues, myIssues, previousIssues]);
+
+  // Combined Filters Logic
   const filteredIssues = useMemo(() => {
-    return myIssues.filter((issue) => {
-      // 1. Issue ID / Title search
+    return allIssues.filter((issue) => {
       const searchLower = searchTerm.toLowerCase();
       const matchSearch =
         !searchTerm ||
         issue.id.toLowerCase().includes(searchLower) ||
         issue.title.toLowerCase().includes(searchLower);
 
-      // 2. Project filter
       const matchProject = projectFilter === 'All' || issue.projectId === projectFilter;
-
-      // 3. Issue Type filter
       const matchType = typeFilter === 'All' || issue.issueType === typeFilter;
-
-      // 4. Date filter
       const matchDate =
         !dateFilter ||
         issue.reportedDate === dateFilter ||
         issue.occurrenceTime.includes(dateFilter);
-
-      // 5. Shift filter
-      const matchShift = shiftFilter === 'All' || issue.shift === (shiftFilter as ShiftType);
-
-      // 6. Status filter
+      const matchShift = shiftFilter === 'All' || issue.shift === shiftFilter;
       const matchStatus = statusFilter === 'All' || issue.status === statusFilter;
 
       return matchSearch && matchProject && matchType && matchDate && matchShift && matchStatus;
     });
-  }, [myIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
+  }, [allIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
 
   const totalPages = Math.ceil(filteredIssues.length / itemsPerPage) || 1;
   const paginatedIssues = filteredIssues.slice(
@@ -80,34 +100,26 @@ export const MyIssuesPage: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const handleDelete = (issue: Issue) => {
-    if (window.confirm(`Are you sure you want to delete ${issue.id}: "${issue.title}"?`)) {
-      const ok = deleteIssue(issue.id);
-      if (!ok) {
-        alert('This issue cannot be deleted because it is no longer in Open status.');
-      }
-    }
-  };
-
   return (
-    <div className="d-flex flex-column h-100 overflow-hidden">
+    <div className="d-flex flex-column h-100 min-h-0">
       
       {/* ================= 6 SPECIFIED FILTERS BAR ================= */}
-      <div className="bg-white rounded-3 border border-light-subtle shadow-sm p-2 mb-2 flex-shrink-0">
-        <div className="row g-2 align-items-end">
+      <div className="bg-white rounded-3 border border-light-subtle shadow-sm p-2.5 mb-2.5 flex-shrink-0">
+        <div className="row g-2.5 align-items-end">
           
           {/* Filter 1: Issue ID / Title */}
-          <div className="col-12 col-md-3">
-            <label className="form-label small fw-semibold text-muted mb-0.5" style={{ fontSize: '0.72rem' }}>
+          <div className="col-12 col-sm-6 col-lg-3">
+            <label className="filter-label-sm">
               1. Issue ID / Title
             </label>
             <div className="input-group input-group-sm">
-              <span className="input-group-text bg-light text-muted border-end-0 py-0.5">
+              <span className="input-group-text bg-light text-muted border-end-0 py-1" style={{ borderRadius: '8px 0 0 8px' }}>
                 <i className="bi bi-search"></i>
               </span>
               <input
                 type="text"
-                className="form-control form-control-sm border-start-0 py-1"
+                className="form-control filter-control-sm border-start-0"
+                style={{ borderRadius: '0 8px 8px 0' }}
                 placeholder="Search ID or Title..."
                 value={searchTerm}
                 onChange={(e) => {
@@ -119,12 +131,12 @@ export const MyIssuesPage: React.FC = () => {
           </div>
 
           {/* Filter 2: Project */}
-          <div className="col-6 col-md-2">
-            <label className="form-label small fw-semibold text-muted mb-0.5" style={{ fontSize: '0.72rem' }}>
+          <div className="col-6 col-sm-6 col-lg-2">
+            <label className="filter-label-sm">
               2. Project
             </label>
             <select
-              className="form-select form-select-sm py-1"
+              className="form-select filter-control-sm"
               value={projectFilter}
               onChange={(e) => {
                 setProjectFilter(e.target.value);
@@ -132,20 +144,30 @@ export const MyIssuesPage: React.FC = () => {
               }}
             >
               <option value="All">All Projects</option>
-              <option value="Nokia Production Dashboard">Nokia Production</option>
-              <option value="Manufacturing Analytics">Manufacturing</option>
-              <option value="Inventory Monitoring">Inventory</option>
-              <option value="Network Monitoring">Network</option>
+              {projectOptions.length > 0 ? (
+                projectOptions.map((proj) => (
+                  <option key={proj} value={proj}>
+                    {proj}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="Nokia Production Dashboard">Nokia Production</option>
+                  <option value="Manufacturing Analytics">Manufacturing</option>
+                  <option value="Inventory Monitoring">Inventory</option>
+                  <option value="Network Monitoring">Network</option>
+                </>
+              )}
             </select>
           </div>
 
           {/* Filter 3: Issue Type */}
-          <div className="col-6 col-md-2">
-            <label className="form-label small fw-semibold text-muted mb-0.5" style={{ fontSize: '0.72rem' }}>
+          <div className="col-6 col-sm-6 col-lg-2">
+            <label className="filter-label-sm">
               3. Issue Type
             </label>
             <select
-              className="form-select form-select-sm py-1"
+              className="form-select filter-control-sm"
               value={typeFilter}
               onChange={(e) => {
                 setTypeFilter(e.target.value);
@@ -153,21 +175,22 @@ export const MyIssuesPage: React.FC = () => {
               }}
             >
               <option value="All">All Types</option>
-              <option value="FRONTEND">Frontend Issue</option>
-              <option value="BACKEND">Backend Issue</option>
-              <option value="DATABASE">Database Issue</option>
-              <option value="OTHERS">Others</option>
+              <option value="Front-end">Front-end</option>
+              <option value="Backend">Backend</option>
+              <option value="Database">Database</option>
+              <option value="Hardware">Hardware</option>
+              <option value="Others">Others</option>
             </select>
           </div>
 
           {/* Filter 4: Date */}
-          <div className="col-6 col-md-2">
-            <label className="form-label small fw-semibold text-muted mb-0.5" style={{ fontSize: '0.72rem' }}>
+          <div className="col-6 col-sm-6 col-lg-2">
+            <label className="filter-label-sm">
               4. Date
             </label>
             <input
               type="date"
-              className="form-control form-control-sm py-1"
+              className="form-control filter-control-sm"
               value={dateFilter}
               onChange={(e) => {
                 setDateFilter(e.target.value);
@@ -177,12 +200,12 @@ export const MyIssuesPage: React.FC = () => {
           </div>
 
           {/* Filter 5: Shift */}
-          <div className="col-6 col-md-1">
-            <label className="form-label small fw-semibold text-muted mb-0.5" style={{ fontSize: '0.72rem' }}>
+          <div className="col-6 col-sm-4 col-lg-1" style={{ minWidth: '95px' }}>
+            <label className="filter-label-sm">
               5. Shift
             </label>
             <select
-              className="form-select form-select-sm py-1 border-primary-subtle"
+              className="form-select filter-control-sm"
               value={shiftFilter}
               onChange={(e) => {
                 setShiftFilter(e.target.value);
@@ -190,19 +213,20 @@ export const MyIssuesPage: React.FC = () => {
               }}
             >
               <option value="All">All</option>
-              <option value="A">Shift A</option>
-              <option value="B">Shift B</option>
-              <option value="C">Shift C</option>
+              <option value="Shift-A">Shift-A</option>
+              <option value="Shift-B">Shift-B</option>
+              <option value="Shift-C">Shift-C</option>
+              <option value="General">General</option>
             </select>
           </div>
 
           {/* Filter 6: Status */}
-          <div className="col-6 col-md-1">
-            <label className="form-label small fw-semibold text-muted mb-0.5" style={{ fontSize: '0.72rem' }}>
+          <div className="col-6 col-sm-4 col-lg-1" style={{ minWidth: '95px' }}>
+            <label className="filter-label-sm">
               6. Status
             </label>
             <select
-              className="form-select form-select-sm py-1"
+              className="form-select filter-control-sm"
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value);
@@ -211,51 +235,41 @@ export const MyIssuesPage: React.FC = () => {
             >
               <option value="All">All</option>
               <option value="Open">Open</option>
-              <option value="Hold">Hold</option>
-              <option value="In Progress">In Prog</option>
+              <option value="In progress">In Prog</option>
+              <option value="On Hold">Hold</option>
+              <option value="Pending">Pending</option>
+              <option value="Escalated">Escalated</option>
               <option value="Resolved">Resolved</option>
             </select>
           </div>
 
           {/* Clear Filters Button */}
-          <div className="col-6 col-md-1 text-end">
+          <div className="col-12 col-sm-4 col-lg-1 d-flex align-items-end" style={{ minWidth: '85px' }}>
             <button
               type="button"
-              className="btn btn-sm btn-outline-secondary w-100 py-1"
+              className="btn btn-outline-secondary w-100 filter-control-sm d-flex align-items-center justify-content-center gap-1"
               title="Reset all filters"
               onClick={handleClearFilters}
             >
-              <i className="bi bi-x-circle me-1"></i>Clear
+              <i className="bi bi-x-circle"></i>
+              <span>Clear</span>
             </button>
           </div>
 
         </div>
       </div>
 
-      {/* API Connection Warning / Retry Alert */}
-      {myIssuesError && (
-        <div className="alert alert-warning py-1.5 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-2 flex-shrink-0">
-          <div className="d-flex align-items-center gap-2">
-            <i className="bi bi-exclamation-triangle-fill text-warning fs-6"></i>
-            <span>{myIssuesError}</span>
-          </div>
-          <button className="btn btn-sm btn-outline-dark py-0 px-2" onClick={refreshMyIssues}>
-            Retry API
-          </button>
-        </div>
-      )}
-
-      {/* ================= MAIN MY ISSUES TABLE ================= */}
+      {/* ================= MAIN ALL ISSUES TABLE ================= */}
       <div className="fixed-table-card flex-grow-1 min-h-0">
         
         {/* Sub-header info bar */}
         <div className="px-3 py-1.5 border-bottom bg-light d-flex align-items-center justify-content-between flex-shrink-0">
           <div className="d-flex align-items-center gap-2">
             <span className="small fw-semibold text-navy">
-              My Reported Issues
+              All Accessible Incidents
             </span>
             <span className="badge bg-primary text-white rounded-pill" style={{ fontSize: '0.68rem' }}>
-              {filteredIssues.length} of {myIssues.length} issues
+              {filteredIssues.length} of {allIssues.length} issues
             </span>
           </div>
 
@@ -267,9 +281,9 @@ export const MyIssuesPage: React.FC = () => {
               type="button"
               className="btn btn-sm btn-outline-secondary py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
               style={{ fontSize: '0.74rem' }}
-              onClick={refreshMyIssues}
+              onClick={() => refreshIssues()}
               disabled={isLoading}
-              title="Refresh from /my-issues/ endpoint"
+              title="Refresh all issues"
             >
               <i className={`bi bi-arrow-clockwise ${isLoading ? 'spinner-border spinner-border-sm' : ''}`}></i>
               Refresh
@@ -278,8 +292,9 @@ export const MyIssuesPage: React.FC = () => {
               type="button"
               className="btn btn-sm btn-outline-success py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
               style={{ fontSize: '0.74rem' }}
-              onClick={() => exportIssuesToCsv(filteredIssues, `my_issues_${currentUser?.employeeId || 'export'}.csv`)}
-              title="Export filtered issues to CSV"
+              onClick={() => exportIssuesToCsv(filteredIssues, `all_issues_${currentUser?.employeeId || 'dev'}.csv`)}
+              title="Export all issues to CSV"
+              disabled={filteredIssues.length === 0}
             >
               <i className="bi bi-file-earmark-spreadsheet"></i>
               Export CSV
@@ -291,21 +306,28 @@ export const MyIssuesPage: React.FC = () => {
         <div className="table-scroll-area">
           <table className="table table-hover align-middle mb-0">
             <thead className="table-light sticky-top" style={{ zIndex: 1 }}>
-              <tr className="small text-muted text-uppercase" style={{ fontSize: '0.72rem' }}>
-                <th style={{ width: '95px' }}>Issue ID</th>
-                <th>Project</th>
-                <th>Issue Title</th>
-                <th style={{ maxWidth: '240px' }}>Short Description</th>
-                <th>Type</th>
-                <th>Shift</th>
-                <th>Reported Date</th>
-                <th>Developer</th>
-                <th>Status</th>
-                <th className="text-end" style={{ width: '100px' }}>Actions</th>
+              <tr className="small text-muted text-uppercase" style={{ fontSize: '0.72rem', letterSpacing: '0.4px' }}>
+                <th style={{ minWidth: '95px', width: '95px' }}>Issue ID</th>
+                <th style={{ minWidth: '150px' }}>Project</th>
+                <th style={{ minWidth: '170px' }}>Issue Title</th>
+                <th style={{ minWidth: '220px', maxWidth: '300px' }}>Short Description</th>
+                <th style={{ minWidth: '105px' }}>Type</th>
+                <th style={{ minWidth: '90px' }}>Shift</th>
+                <th style={{ minWidth: '110px' }}>Reported Date</th>
+                <th style={{ minWidth: '140px' }}>Assigned To</th>
+                <th style={{ minWidth: '115px' }}>Status</th>
+                <th className="text-end" style={{ minWidth: '95px', width: '95px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {paginatedIssues.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={10} className="text-center py-5 text-muted">
+                    <div className="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                    Loading all incidents...
+                  </td>
+                </tr>
+              ) : paginatedIssues.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="text-center py-5 text-muted">
                     <i className="bi bi-inbox fs-2 d-block mb-1 text-secondary opacity-50"></i>
@@ -317,10 +339,10 @@ export const MyIssuesPage: React.FC = () => {
                   <tr
                     key={issue.id}
                     style={{ cursor: 'pointer' }}
-                    onClick={() => setActiveModalIssue(issue)}
+                    onClick={() => navigate(`/issues/${issue.id}`, { state: { from: 'developer-all', issue } })}
                   >
                     <td className="fw-bold text-primary small">{issue.id}</td>
-                    <td className="small text-navy fw-medium">{issue.projectId}</td>
+                    <td className="small text-navy fw-medium">{issue.projectName || issue.projectId}</td>
                     <td className="fw-semibold text-navy small">{issue.title}</td>
                     <td className="small text-muted text-truncate" style={{ maxWidth: '240px' }}>
                       {issue.shortDescription}
@@ -333,7 +355,7 @@ export const MyIssuesPage: React.FC = () => {
                     <td>
                       <span className="badge bg-light text-navy border small" style={{ fontSize: '0.7rem' }}>
                         <i className="bi bi-clock me-1 text-primary"></i>
-                        {issue.shift || 'Shift A'}
+                        {issue.shift || 'Shift-A'}
                       </span>
                     </td>
                     <td className="small text-muted" style={{ fontSize: '0.78rem' }}>{issue.reportedDate}</td>
@@ -351,26 +373,14 @@ export const MyIssuesPage: React.FC = () => {
                       <StatusBadge status={issue.status} size="sm" />
                     </td>
                     <td className="text-end" onClick={(e) => e.stopPropagation()}>
-                      <div className="btn-group btn-group-sm">
-                        <button
-                          type="button"
-                          className="btn btn-light border text-primary py-0.5 px-2"
-                          title="View Details & Chat"
-                          onClick={() => setActiveModalIssue(issue)}
-                        >
-                          <i className="bi bi-eye"></i>
-                        </button>
-                        {issue.isEligibleForDelete && issue.status === 'Open' && (
-                          <button
-                            type="button"
-                            className="btn btn-light border text-danger py-0.5 px-2"
-                            title="Delete Issue"
-                            onClick={() => handleDelete(issue)}
-                          >
-                            <i className="bi bi-trash"></i>
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-light border text-primary py-0.5 px-2 rounded-2"
+                        title="View Details & Chat"
+                        onClick={() => navigate(`/issues/${issue.id}`, { state: { from: 'developer-all', issue } })}
+                      >
+                        <i className="bi bi-box-arrow-up-right me-1"></i>Details
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -379,41 +389,22 @@ export const MyIssuesPage: React.FC = () => {
           </table>
         </div>
 
-        {/* Pinned Pagination at Bottom */}
-        <div className="px-3 py-1.5 border-top bg-light d-flex align-items-center justify-content-between flex-shrink-0">
-          <span className="small text-muted" style={{ fontSize: '0.74rem' }}>
-            Showing {paginatedIssues.length} of {filteredIssues.length} issues (Page {currentPage} of {totalPages})
-          </span>
-          <div className="btn-group btn-group-sm">
-            <button
-              type="button"
-              className="btn btn-outline-secondary py-0.5 px-2.5"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-            >
-              Prev
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary py-0.5 px-2.5"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        {/* Pinned Reusable Pagination Component */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredIssues.length}
+          pageSize={itemsPerPage}
+          hasNext={currentPage < totalPages}
+          hasPrevious={currentPage > 1}
+          onPageChange={setCurrentPage}
+          isLoading={isLoading}
+        />
 
       </div>
-
-      {/* Details & 2-Way Chat Modal */}
-      {activeModalIssue && (
-        <IssueDetailsModal
-          issue={activeModalIssue}
-          onClose={() => setActiveModalIssue(null)}
-        />
-      )}
 
     </div>
   );
 };
+export default DeveloperAllIssuesPage;
+

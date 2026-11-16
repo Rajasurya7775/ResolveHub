@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Issue, DiscussionMessage, IssueStatus } from '../types/issue';
+import { Issue, DiscussionMessage, IssueStatus, PaginatedIssuesResponse } from '../types/issue';
 import { useAuth } from './AuthContext';
 import {
   apiFetchMyIssues,
   apiFetchPreviousIssues,
   apiCreateIssue,
+  apiUpdateIssue,
   apiDeleteIssue,
   apiSendMessage,
   apiFetchMessages
@@ -37,8 +38,10 @@ interface IssueContextType {
   previousIssuesError: string | null;
 
   refreshIssues: () => Promise<void>;
-  refreshMyIssues: () => Promise<void>;
-  refreshPreviousIssues: () => Promise<void>;
+  myIssuesPagination: Omit<PaginatedIssuesResponse, 'items'>;
+  previousIssuesPagination: Omit<PaginatedIssuesResponse, 'items'>;
+  refreshMyIssues: (page?: number) => Promise<void>;
+  refreshPreviousIssues: (page?: number) => Promise<void>;
 
   addIssue: (newIssueData: AddIssueInput) => Promise<Issue>;
   updateIssue: (id: string, updatedFields: Partial<Issue>) => void;
@@ -53,6 +56,7 @@ const IssueContext = createContext<IssueContextType | undefined>(undefined);
 const MY_ISSUES_STORAGE_KEY = 'resolvehub_my_issues_v3';
 const PREVIOUS_ISSUES_STORAGE_KEY = 'resolvehub_previous_issues_v3';
 const DISCUSSIONS_STORAGE_KEY = 'resolvehub_discussions_data_v2';
+const ISSUE_PAGE_SIZE = 10;
 
 export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, isAuthenticated } = useAuth();
@@ -87,47 +91,92 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   });
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const initialPagination = {
+    total: 0,
+    page: 1,
+    pageSize: ISSUE_PAGE_SIZE,
+    totalPages: 1,
+    hasNext: false,
+    hasPrevious: false
+  };
+
+  const [myIssuesPagination, setMyIssuesPagination] = useState<Omit<PaginatedIssuesResponse, 'items'>>(initialPagination);
+  const [previousIssuesPagination, setPreviousIssuesPagination] = useState<Omit<PaginatedIssuesResponse, 'items'>>(initialPagination);
+  const [myIssuesLoading, setMyIssuesLoading] = useState<boolean>(false);
+  const [previousIssuesLoading, setPreviousIssuesLoading] = useState<boolean>(false);
+  const isLoading = myIssuesLoading || previousIssuesLoading;
   const [myIssuesError, setMyIssuesError] = useState<string | null>(null);
   const [previousIssuesError, setPreviousIssuesError] = useState<string | null>(null);
 
-  // 1. Fetch My Issues: GET /my-issues/
-  const refreshMyIssues = useCallback(async () => {
+  // Fetch one page of My Issues from the backend.
+  const refreshMyIssues = useCallback(async (page: number = 1) => {
     if (isMock) return;
     const token = localStorage.getItem('resolvehub_auth_token');
-    if (!token) return; // Do not fetch if unauthenticated
+    if (!token) return;
     if (location?.pathname.includes('/login') || location?.pathname.includes('/signup')) return;
 
-    setIsLoading(true);
+    setMyIssuesLoading(true);
     setMyIssuesError(null);
 
-    const res = await apiFetchMyIssues();
-    setIsLoading(false);
-
-    if (res.success && res.data) {
-      setMyIssues(res.data);
-    } else {
-      setMyIssuesError(res.message || 'Failed to fetch My Issues.');
+    try {
+      const res = await apiFetchMyIssues({ page, pageSize: ISSUE_PAGE_SIZE });
+      if (res.success && res.data) {
+        setMyIssues(res.data.items);
+        const total = res.data.pagination?.total_items ?? res.data.total;
+        const curPage = res.data.pagination?.current_page ?? res.data.page;
+        const size = res.data.pagination?.page_size ?? res.data.pageSize;
+        const pages = res.data.pagination?.total_pages ?? res.data.totalPages;
+        const next = res.data.pagination?.has_next ?? res.data.hasNext;
+        const prev = res.data.pagination?.has_previous ?? res.data.hasPrevious;
+        setMyIssuesPagination({
+          total,
+          page: curPage,
+          pageSize: size,
+          totalPages: pages,
+          hasNext: next,
+          hasPrevious: prev
+        });
+      } else {
+        setMyIssuesError(res.message || 'Failed to fetch My Issues.');
+      }
+    } finally {
+      setMyIssuesLoading(false);
     }
   }, [isMock, location?.pathname]);
 
-  // 2. Fetch Previous Issues: GET /previous-issues/
-  const refreshPreviousIssues = useCallback(async () => {
+  // Fetch one page of Previous Issues from the backend.
+  const refreshPreviousIssues = useCallback(async (page: number = 1) => {
     if (isMock) return;
     const token = localStorage.getItem('resolvehub_auth_token');
-    if (!token) return; // Do not fetch if unauthenticated
+    if (!token) return;
     if (location?.pathname.includes('/login') || location?.pathname.includes('/signup')) return;
 
-    setIsLoading(true);
+    setPreviousIssuesLoading(true);
     setPreviousIssuesError(null);
 
-    const res = await apiFetchPreviousIssues();
-    setIsLoading(false);
-
-    if (res.success && res.data) {
-      setPreviousIssues(res.data);
-    } else {
-      setPreviousIssuesError(res.message || 'Failed to fetch Previous Issues.');
+    try {
+      const res = await apiFetchPreviousIssues({ page, pageSize: ISSUE_PAGE_SIZE });
+      if (res.success && res.data) {
+        setPreviousIssues(res.data.items);
+        const total = res.data.pagination?.total_items ?? res.data.total;
+        const curPage = res.data.pagination?.current_page ?? res.data.page;
+        const size = res.data.pagination?.page_size ?? res.data.pageSize;
+        const pages = res.data.pagination?.total_pages ?? res.data.totalPages;
+        const next = res.data.pagination?.has_next ?? res.data.hasNext;
+        const prev = res.data.pagination?.has_previous ?? res.data.hasPrevious;
+        setPreviousIssuesPagination({
+          total,
+          page: curPage,
+          pageSize: size,
+          totalPages: pages,
+          hasNext: next,
+          hasPrevious: prev
+        });
+      } else {
+        setPreviousIssuesError(res.message || 'Failed to fetch Previous Issues.');
+      }
+    } finally {
+      setPreviousIssuesLoading(false);
     }
   }, [isMock, location?.pathname]);
 
@@ -149,6 +198,8 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Clear cached data on logout
       setMyIssues([]);
       setPreviousIssues([]);
+      setMyIssuesPagination(initialPagination);
+      setPreviousIssuesPagination(initialPagination);
       setDiscussions({});
     }
   }, [isMock, isAuthenticated, currentUser?.id, refreshIssues, location?.pathname]);
@@ -234,7 +285,10 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newIssue;
   };
 
-  const updateIssue = (id: string, updatedFields: Partial<Issue>) => {
+  const updateIssue = async (id: string, updatedFields: Partial<Issue>) => {
+    if (!isMock) {
+      await apiUpdateIssue(id, updatedFields);
+    }
     setMyIssues((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
     );
@@ -313,6 +367,8 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         previousIssues,
         discussions,
         isLoading,
+        myIssuesPagination,
+        previousIssuesPagination,
         apiError: myIssuesError || previousIssuesError,
         myIssuesError,
         previousIssuesError,

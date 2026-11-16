@@ -9,7 +9,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
-  const { logout } = useAuth();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -17,11 +17,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
     navigate('/login');
   };
 
-  const navLinks = [
-    { to: '/home', label: 'Home', icon: 'bi-house-door-fill' },
-    { to: '/issues/my', label: 'My Issues', icon: 'bi-list-ul' },
-    { to: '/issues/previous', label: 'Previous Issues', icon: 'bi-clock-history' }
-  ];
+  const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
+
+  // Role-based navigation items
+  const navLinks = isDev
+    ? [
+        { to: '/developer/home', label: 'Home', icon: 'bi-house-door-fill' },
+        { to: '/developer/assigned', label: 'Assigned Issues', icon: 'bi-person-check-fill' },
+        { to: '/developer/all', label: 'All Issues', icon: 'bi-grid-fill' }
+      ]
+    : [
+        { to: '/support/home', label: 'Home', icon: 'bi-house-door-fill' },
+        { to: '/support/my-issues', label: 'My Issues', icon: 'bi-list-ul' },
+        { to: '/support/previous-issues', label: 'Previous Issues', icon: 'bi-clock-history' }
+      ];
 
   return (
     <>

@@ -2,15 +2,12 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { IssueProvider } from './context/IssueContext';
-import { LoginPage } from './pages/auth/LoginPage';
-import { SignupPage } from './pages/auth/SignupPage';
+import { LoginPage, SignupPage } from './pages/auth';
 import { DashboardLayout } from './components/layout/DashboardLayout';
-import { HomePage } from './pages/dashboard/HomePage';
-import { MyIssuesPage } from './pages/issues/MyIssuesPage';
-import { PreviousIssuesPage } from './pages/issues/PreviousIssuesPage';
-import { ProfilePage } from './pages/profile/ProfilePage';
-import { IssueFormPage } from './pages/issues/IssueFormPage';
-import { DeveloperDashboard } from './pages/developer/DeveloperDashboard';
+import { SupportDashboard, MyIssuesPage, PreviousIssuesPage } from './pages/support';
+import { DeveloperDashboard, DeveloperAssignedIssuesPage, DeveloperAllIssuesPage } from './pages/developer';
+import { IssueDetailsPage, IssueFormPage } from './pages/issues';
+import { ProfilePage } from './pages/profile';
 
 export const App: React.FC = () => {
   return (
@@ -22,24 +19,37 @@ export const App: React.FC = () => {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
 
-            {/* Authenticated Supporter Routes */}
+            {/* Authenticated Dashboard Routes */}
             <Route element={<DashboardLayout />}>
-              <Route path="/home" element={<HomePage />} />
-              <Route path="/dashboard" element={<Navigate to="/home" replace />} />
+              {/* Support Routes */}
+              <Route path="/support/home" element={<SupportDashboard />} />
+              <Route path="/support" element={<Navigate to="/support/home" replace />} />
+              <Route path="/support/my-issues" element={<MyIssuesPage />} />
+              <Route path="/support/previous-issues" element={<PreviousIssuesPage />} />
+
+              {/* Developer Routes */}
+              <Route path="/developer/home" element={<DeveloperDashboard />} />
+              <Route path="/developer" element={<Navigate to="/developer/home" replace />} />
+              <Route path="/developer/assigned" element={<DeveloperAssignedIssuesPage />} />
+              <Route path="/developer/all" element={<DeveloperAllIssuesPage />} />
+
+              {/* Legacy / Helper Redirects */}
+              <Route path="/home" element={<Navigate to="/support/home" replace />} />
+              <Route path="/dashboard" element={<Navigate to="/support/home" replace />} />
+              <Route path="/issues/my" element={<Navigate to="/support/my-issues" replace />} />
+              <Route path="/issues/all" element={<Navigate to="/support/my-issues" replace />} />
+              <Route path="/issues/previous" element={<Navigate to="/support/previous-issues" replace />} />
               <Route path="/issues/new" element={<IssueFormPage />} />
               <Route path="/issues/report" element={<Navigate to="/issues/new" replace />} />
-              <Route path="/issues/my" element={<MyIssuesPage />} />
-              <Route path="/issues/all" element={<Navigate to="/issues/my" replace />} />
-              <Route path="/issues/previous" element={<PreviousIssuesPage />} />
+
+              {/* Shared Ticket Details & Profile */}
+              <Route path="/issues/:id" element={<IssueDetailsPage />} />
               <Route path="/profile" element={<ProfilePage />} />
             </Route>
 
-            {/* Developer Module */}
-            <Route path="/developer" element={<DeveloperDashboard />} />
-
             {/* Default Catch-all */}
             <Route path="/" element={<Navigate to="/login" replace />} />
-            <Route path="*" element={<Navigate to="/home" replace />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </IssueProvider>
       </AuthProvider>

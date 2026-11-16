@@ -27,15 +27,15 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
       icon = 'bi-arrow-repeat';
       break;
     case 'Pending':
-      badgeClass = 'bg-warning-subtle text-warning-emphasis border border-warning-subtle';
+      badgeClass = 'badge-status-pending';
       icon = 'bi-clock-history';
       break;
     case 'On Hold':
-      badgeClass = 'bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle';
+      badgeClass = 'badge-status-on-hold';
       icon = 'bi-pause-circle';
       break;
     case 'Escalated':
-      badgeClass = 'bg-danger-subtle text-danger border border-danger-subtle';
+      badgeClass = 'badge-status-escalated';
       icon = 'bi-exclamation-triangle-fill';
       break;
     case 'Resolved':

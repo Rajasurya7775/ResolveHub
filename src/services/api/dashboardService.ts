@@ -10,6 +10,14 @@ export interface DashboardSummary {
   raw?: any;
 }
 
+export interface DeveloperDashboardSummary {
+  totalIssues: number;
+  assignedIssues: number;
+  inProgressCount: number;
+  pendingCount: number;
+  raw?: any;
+}
+
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('resolvehub_auth_token');
   return {
@@ -88,6 +96,127 @@ export async function apiFetchDashboardSummary(): Promise<{
     return {
       success: false,
       message: error.name === 'AbortError' ? 'Dashboard summary request timed out.' : error.message
+    };
+  }
+}
+
+/**
+ * Fetches Developer Dashboard summary and KPI metrics from:
+ * 1. /api/v1/developer/dashboard/summary
+ * 2. /api/v1/developer/summary
+ * 3. /api/v1/dashboard/summary
+ */
+export async function apiFetchDeveloperSummary(
+  developerEmployeeId?: string,
+  developerName?: string
+): Promise<{
+  success: boolean;
+  data?: DeveloperDashboardSummary;
+  message?: string;
+}> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    const query = new URLSearchParams();
+    if (developerEmployeeId) query.append('developer_id', developerEmployeeId);
+    if (developerName) query.append('developer_name', developerName);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+
+    // 1. Try developer-specific endpoint first
+    let response = await fetch(`${API_BASE_URL}/developer/dashboard/summary${qs}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      signal: controller.signal
+    }).catch(() => null);
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/developer/summary${qs}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/dashboard/summary${qs}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    clearTimeout(timeoutId);
+
+    if (!response) {
+      return {
+        success: false,
+        message: `Failed to connect to Developer dashboard summary at ${API_BASE_URL}`
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        success: false,
+        message: `Developer dashboard API returned error ${response.status}`
+      };
+    }
+
+    const json = await response.json();
+    const payload = json.data || json.summary || json;
+
+    const total =
+      Number(
+        payload.total_issues ??
+          payload.totalIssues ??
+          payload.total_logged_issues ??
+          payload.totalLogged ??
+          payload.total
+      ) || 0;
+
+    const assigned =
+      Number(
+        payload.assigned_issues ??
+          payload.assignedIssues ??
+          payload.assigned_to_me ??
+          payload.assignedCount ??
+          payload.accepted_issues ??
+          payload.acceptedCount
+      ) || 0;
+
+    const inProgress =
+      Number(
+        payload.in_progress_issues ??
+          payload.inProgressCount ??
+          payload.in_progress ??
+          payload.inProgress
+      ) || 0;
+
+    const pending =
+      Number(
+        payload.pending_issues ??
+          payload.pendingCount ??
+          payload.pending ??
+          payload.on_hold_issues ??
+          payload.onHoldCount ??
+          payload.open_issues ??
+          payload.openCount
+      ) || 0;
+
+    return {
+      success: true,
+      data: {
+        totalIssues: total,
+        assignedIssues: assigned,
+        inProgressCount: inProgress,
+        pendingCount: pending,
+        raw: payload
+      }
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.name === 'AbortError' ? 'Developer dashboard request timed out.' : error.message
     };
   }
 }

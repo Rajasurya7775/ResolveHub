@@ -54,25 +54,46 @@ h1, h2, h3, h4, h5, h6, .brand-font {
 
 .content-pane {
   flex: 1;
+  min-height: 0;
   height: calc(100vh - var(--topbar-height));
   max-height: calc(100vh - var(--topbar-height));
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 1.15rem;
+  padding: 0.85rem 1.25rem;
 }
 
-/* ================= LOGIN PAGE: NO SCROLL (FIXED VIEWPORT) ================= */
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ================= LOGIN & SIGNUP PAGE WRAPPER ================= */
 .login-page-wrapper {
-  height: 100vh;
-  max-height: 100vh;
+  min-height: 100vh;
   width: 100vw;
   background: radial-gradient(circle at 18% 25%, #e0eeff 0%, #edf5fe 45%, #f8faff 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden; /* NO SCROLL IN LOGIN PAGE */
-  padding: 1rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1.5rem 1rem;
 }
 
 .login-card-container {
@@ -153,6 +174,7 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   position: relative;
   display: flex;
   align-items: center;
+  margin-bottom: 15px;
 }
 
 .input-icon-group .leading-icon {
@@ -392,6 +414,24 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   border: 1px solid #d8b4fe;
 }
 
+.badge-status-pending {
+  background-color: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fcd34d;
+}
+
+.badge-status-on-hold {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.badge-status-escalated {
+  background-color: #ffe4e6;
+  color: #e11d48;
+  border: 1px solid #fda4af;
+}
+
 .badge-status-resolved {
   background-color: #dcfce7;
   color: #15803d;
@@ -408,11 +448,71 @@ h1, h2, h3, h4, h5, h6, .brand-font {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 0;
+  min-height: 380px;
 }
 
 .table-scroll-area {
   flex: 1;
   overflow-y: auto;
+  overflow-x: auto;
   min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Enterprise Filter Controls */
+.filter-control-sm {
+  height: 34px !important;
+  font-size: 0.8rem !important;
+  border-radius: 8px !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #1e293b !important;
+  padding: 0.25rem 0.6rem !important;
+  background-color: #ffffff !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.filter-control-sm:focus {
+  border-color: #0d6efd !important;
+  box-shadow: 0 0 0 2.5px rgba(13, 110, 253, 0.15) !important;
+}
+
+.filter-label-sm {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  margin-bottom: 3px;
+  display: block;
+}
+
+/* Responsive Design Enhancements */
+@media (max-width: 991px) {
+  :root {
+    --sidebar-width: 250px;
+  }
+
+  .content-pane {
+    padding: 0.75rem 0.85rem;
+  }
+
+  .fixed-table-card {
+    min-height: 420px;
+  }
+
+  .details-split-container {
+    height: auto !important;
+    overflow-y: visible !important;
+  }
+
+  .details-column {
+    height: auto !important;
+    min-height: 460px;
+  }
+}
+
+@media (max-width: 576px) {
+  .content-pane {
+    padding: 0.5rem 0.6rem;
+  }
 }

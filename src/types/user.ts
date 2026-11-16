@@ -18,8 +18,9 @@ export interface SignupFormData {
   email: string;
   phone_number: string;
   password: string;
+  confirm_password: string;
+  role: UserRole;
   role_type: string;
-  role: UserRole | string;
 }
 
 export type ShiftType = 'Shift A' | 'Shift B' | 'Shift C';

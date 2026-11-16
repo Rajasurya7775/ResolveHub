@@ -78,3 +78,34 @@ export interface Issue {
   resolvedDate?: string;
   isEligibleForDelete?: boolean;
 }
+
+export interface PaginationMetadata {
+  total_items: number;
+  total_pages: number;
+  current_page: number;
+  has_next: boolean;
+  has_previous: boolean;
+  page_size?: number;
+}
+
+export interface PaginatedIssuesResponse {
+  items: Issue[];
+  pagination?: PaginationMetadata;
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+}
+
+export interface FetchIssuesParams {
+  page?: number;
+  pageSize?: number;
+  project?: string;
+  issueType?: string;
+  date?: string;
+  shift?: string;
+  status?: string;
+  search?: string;
+}

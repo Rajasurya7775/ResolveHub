@@ -51,46 +51,48 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
     <header className="app-topbar d-flex align-items-center justify-content-between px-3 px-lg-4 bg-white">
       
       {/* ================= LEFT: Mobile Hamburger & Page Title ================= */}
-      <div className="d-flex align-items-center gap-2.5">
+      <div className="d-flex align-items-center gap-2 flex-shrink-0">
         {onToggleSidebar && (
           <button
             type="button"
-            className="btn btn-light d-lg-none border-0 p-1 text-secondary"
+            className="btn btn-light d-lg-none border-0 p-1 text-secondary rounded-2"
             onClick={onToggleSidebar}
             aria-label="Toggle navigation menu"
           >
             <i className="bi bi-list fs-5"></i>
           </button>
         )}
-        <h4 className="fw-bold text-navy mb-0 fs-5">{pageTitle}</h4>
+        <h4 className="fw-bold text-navy mb-0 fs-5 text-truncate" style={{ maxWidth: '220px' }}>
+          {pageTitle}
+        </h4>
       </div>
 
       {/* ================= CENTER: Shift, Date & Live Time Widget ================= */}
-      <div className="d-flex align-items-center gap-2 gap-md-3 px-3 py-1.5 rounded-pill bg-light border border-light-subtle shadow-xs">
+      <div className="d-flex align-items-center gap-1.7 gap-md-2.7 px-2.5 px-md-3 py-1 rounded-pill bg-light border border-light-subtle shadow-xs">
         
         {/* 1. Current Shift Badge */}
         <div
-          className="d-flex align-items-center gap-1.5"
-          title={`Operational Shift: ${shiftInfo.shift} (${shiftTiming})`}
+          className="d-flex align-items-center gap-1"
+           title={`Operational Shift: ${shiftInfo.shift} (${shiftTiming})`}
         >
           <span
-            className={`badge rounded-pill px-2.5 py-1 fw-semibold d-inline-flex align-items-center gap-1.5 ${
+            className={`badge rounded-pill px-2 py-0.5 fw-semibold d-inline-flex align-items-center gap-1 ${
               shiftInfo.shift === 'Shift A'
                 ? 'bg-primary-subtle text-primary border border-primary-subtle'
                 : shiftInfo.shift === 'Shift B'
                 ? 'bg-warning-subtle text-warning-emphasis border border-warning-subtle'
                 : 'bg-info-subtle text-info-emphasis border border-info-subtle'
             }`}
-            style={{ fontSize: '0.78rem' }}
+            style={{ fontSize: '0.75rem' }}
           >
             <span
-              className="rounded-circle bg-current"
+              className="rounded-circle"
               style={{ width: '6px', height: '6px', backgroundColor: 'currentColor' }}
             ></span>
             <span>{shiftInfo.shift}</span>
           </span>
 
-          <span className="text-secondary small d-none d-xl-inline" style={{ fontSize: '0.73rem' }}>
+          <span className="text-secondary small d-none d-xl-inline" style={{ fontSize: '0.72rem' }}>
             ({shiftTiming})
           </span>
         </div>
@@ -98,17 +100,17 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
         <div className="vr text-muted d-none d-sm-block" style={{ height: '14px', opacity: 0.35 }}></div>
 
         {/* 2. Current Date */}
-        <div className="d-none d-sm-flex align-items-center gap-1.5 text-secondary small" style={{ fontSize: '0.8rem' }}>
+        <div className="d-none d-md-flex align-items-center gap-1 text-secondary small" style={{ fontSize: '0.78rem' }}>
           <i className="bi bi-calendar3 text-muted"></i>
           <span className="fw-medium text-navy">{formattedDate}</span>
         </div>
 
-        <div className="vr text-muted" style={{ height: '14px', opacity: 0.35 }}></div>
+        <div className="vr text-muted d-none d-md-block" style={{ height: '14px', opacity: 0.35 }}></div>
 
         {/* 3. Live Time */}
         <div
-          className="d-flex align-items-center gap-1.5 text-navy font-monospace fw-bold small"
-          style={{ fontSize: '0.82rem' }}
+          className="d-flex align-items-center gap-1 text-navy font-monospace fw-bold small"
+          style={{ fontSize: '0.8rem' }}
           title="Live System Time"
         >
           <i className="bi bi-clock text-primary"></i>
@@ -118,7 +120,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
       </div>
 
       {/* ================= RIGHT: Notifications & User Profile ================= */}
-      <div className="d-flex align-items-center gap-2 gap-sm-3">
+      <div className="d-flex align-items-center gap-2 gap-sm-3 flex-shrink-0">
         
         {/* Notification Icon with Red Dot */}
         <div className="position-relative">

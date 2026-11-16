@@ -48,7 +48,7 @@ export const HomeInsights: React.FC = () => {
     <div className="row g-3 h-100 flex-grow-1 min-h-0">
       
       {/* ================= 1. LINE CHART ================= */}
-      <div className="col-12 col-lg-6 d-flex flex-column h-100 min-h-0">
+      <div className="col-12 col-lg-6 d-flex flex-column h-100 min-h-0" style={{ minHeight: '260px' }}>
         <div className="graph-card-reference d-flex flex-column h-100 min-h-0">
           
           {/* Header */}
@@ -210,7 +210,7 @@ export const HomeInsights: React.FC = () => {
       </div>
 
       {/* ================= 2. HISTOGRAM ================= */}
-      <div className="col-12 col-lg-6 d-flex flex-column h-100 min-h-0">
+      <div className="col-12 col-lg-6 d-flex flex-column h-100 min-h-0" style={{ minHeight: '260px' }}>
         <div className="graph-card-reference d-flex flex-column h-100 min-h-0">
           
           {/* Header */}

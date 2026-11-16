@@ -10,24 +10,117 @@ export interface AuthResponse {
 }
 
 /**
+ * Decode JWT token to extract claims (e.g. role, sub, email)
+ */
+function decodeJwt(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Normalizes backend user payload into frontend User model
  */
-export function normalizeUser(data: any): User {
-  let role: UserRole = 'Support';
-  const rawRole = String(data.role || '').toLowerCase();
-  if (rawRole.includes('dev')) role = 'Developer';
-  else role = 'Support';
+export function normalizeUser(data: any, fallbackRole?: UserRole): User {
+  if (!data || typeof data !== 'object') {
+    data = {};
+  }
+
+  const source = data.user || data.data || data;
+
+  const rawRole = String(
+    source.role ||
+    source.user_role ||
+    source.role_name ||
+    source.userRole ||
+    data.role ||
+    data.user_role ||
+    ''
+  ).trim().toLowerCase();
+
+  const rawRoleType = String(
+    source.role_type ||
+    source.roleType ||
+    data.role_type ||
+    data.roleType ||
+    ''
+  ).trim().toLowerCase();
+
+  const rawDesignation = String(
+    source.designation ||
+    data.designation ||
+    ''
+  ).trim().toLowerCase();
+
+  // Determine user role
+  let role: UserRole;
+
+  if (
+    rawRole.includes('dev') ||
+    rawRoleType.includes('front') ||
+    rawRoleType.includes('back') ||
+    rawRoleType.includes('data') ||
+    rawDesignation.includes('dev')
+  ) {
+    role = 'Developer';
+  } else if (
+    rawRole.includes('supp') ||
+    rawDesignation.includes('supp')
+  ) {
+    role = 'Support';
+  } else if (fallbackRole) {
+    role = fallbackRole === 'Developer' ? 'Developer' : 'Support';
+  } else {
+    role = 'Support';
+  }
+
+  const empId = String(
+    source.employee_id ||
+    source.employeeId ||
+    source.sub ||
+    data.employee_id ||
+    data.employeeId ||
+    data.sub ||
+    ''
+  );
+
+  const fullName = String(
+    source.full_name ||
+    source.name ||
+    data.full_name ||
+    data.name ||
+    empId ||
+    (role === 'Developer' ? 'Developer' : 'Supporter')
+  );
+
+  const email = String(
+    source.email ||
+    data.email ||
+    ''
+  );
 
   return {
-    id: String(data.user_id || data.id || `usr-${Date.now()}`),
-    employeeId: String(data.employee_id || data.employeeId || ''),
-    name: String(data.full_name || data.name || ''),
-    email: String(data.email || data.emial || ''),
-    phone: data.phone_number || data.phone || '',
+    id: String(source.user_id || source.id || data.user_id || data.id || empId || `usr-${Date.now()}`),
+    employeeId: empId,
+    name: fullName,
+    email: email,
+    phone: source.phone_number || source.phone || data.phone_number || data.phone || '',
     role,
-    roleType: data.role_type || data.roleType || '',
-    accountStatus: (data.account_status as 'Active' | 'Inactive') || 'Active',
-    avatarUrl: data.avatar_url || ''
+    roleType: source.role_type || source.roleType || data.role_type || data.roleType || (role === 'Developer' ? 'Frontend' : 'Support Engineer'),
+    accountStatus: (source.account_status || data.account_status) || 'Active',
+    avatarUrl: source.avatar_url || data.avatar_url || ''
   };
 }
 
@@ -79,11 +172,15 @@ export async function apiLogin(
     body: JSON.stringify(payload)
   };
 
-  // Try /auth/login/ first, fall back to /auth/login or /login/
-  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/login `, reqOptions);
+  // Try /auth/login first, fall back to /auth/login/ or /login
+  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/login`, reqOptions);
 
   if (!response || response.status === 404) {
     response = await fetchWithTimeout(`${API_BASE_URL}/auth/login/`, reqOptions);
+  }
+
+  if (!response || response.status === 404) {
+    response = await fetchWithTimeout(`${API_BASE_URL}/login`, reqOptions);
   }
 
   if (!response) {
@@ -103,8 +200,8 @@ export async function apiLogin(
       (response.status === 401
         ? 'Invalid credentials. Please verify your Email/Employee ID and Password.'
         : response.status === 404
-        ? 'User account not found.'
-        : `Server returned error (${response.status})`);
+          ? 'User account not found.'
+          : `Server returned error (${response.status})`);
 
     return {
       success: false,
@@ -112,14 +209,21 @@ export async function apiLogin(
     };
   }
 
-  const rawUser = data.user || data.data || data;
-  const token = data.access_token || data.token || data.jwt;
+  const token = data?.access_token || data?.token || data?.jwt;
 
   if (token) {
     localStorage.setItem('resolvehub_auth_token', token);
   }
 
-  const user = normalizeUser(rawUser);
+  const jwtPayload = token ? decodeJwt(token) : null;
+  const rawUser = {
+    ...(jwtPayload || {}),
+    ...(data?.user || {}),
+    ...(data?.data || {}),
+    ...(data || {})
+  };
+
+  const user = normalizeUser(rawUser, role);
 
   return {
     success: true,
@@ -138,6 +242,8 @@ export async function apiSignup(formData: SignupFormData): Promise<AuthResponse>
     email: formData.email.trim().toLowerCase(),
     phone_number: formData.phone_number.trim(),
     password: formData.password,
+    confirm_password: formData.confirm_password,
+    confirmPassword: formData.confirm_password,
     role: formData.role === 'Support' || formData.role === 'Supporter' ? 'Support' : 'Developer',
     role_type: formData.role_type.trim()
   };
@@ -151,11 +257,19 @@ export async function apiSignup(formData: SignupFormData): Promise<AuthResponse>
     body: JSON.stringify(payload)
   };
 
-  // Try /auth/signup/ first, fall back to /auth/signup or /auth/register/
+  // Try /auth/signup first, fall back to /auth/signup/ or /auth/register
   let response = await fetchWithTimeout(`${API_BASE_URL}/auth/signup`, reqOptions);
 
   if (!response || response.status === 404) {
     response = await fetchWithTimeout(`${API_BASE_URL}/auth/signup/`, reqOptions);
+  }
+
+  if (!response || response.status === 404) {
+    response = await fetchWithTimeout(`${API_BASE_URL}/auth/register`, reqOptions);
+  }
+
+  if (!response || response.status === 404) {
+    response = await fetchWithTimeout(`${API_BASE_URL}/signup`, reqOptions);
   }
   if (!response) {
     return {
@@ -167,13 +281,28 @@ export async function apiSignup(formData: SignupFormData): Promise<AuthResponse>
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const errorMsg =
+    let errorMsg =
       data?.detail ||
       data?.message ||
-      data?.error ||
-      (response.status === 409
-        ? 'An account with this Email or Employee ID already exists.'
-        : `Registration failed (${response.status})`);
+      data?.error;
+
+    if (!errorMsg && typeof data === 'object' && data !== null) {
+      const fieldErrors = Object.entries(data)
+        .map(([field, msgs]) => {
+          const formattedField = field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+          const msgStr = Array.isArray(msgs) ? msgs.join(', ') : String(msgs);
+          return `${formattedField}: ${msgStr}`;
+        })
+        .join(' | ');
+      if (fieldErrors) errorMsg = fieldErrors;
+    }
+
+    if (!errorMsg) {
+      errorMsg =
+        response.status === 409
+          ? 'An account with this Email or Employee ID already exists.'
+          : `Registration failed (${response.status})`;
+    }
 
     return {
       success: false,

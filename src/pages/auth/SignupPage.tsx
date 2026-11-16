@@ -24,16 +24,30 @@ export const SignupPage: React.FC = () => {
     email: '',
     phone_number: '',
     password: '',
+    confirm_password: '',
     role_type: '',
     role: '' as any
   });
 
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [signupSuccess, setSignupSuccess] = useState(false);
+
+  // Real-time password validation checks
+  const passwordChecks = {
+    minLength: formData.password.length >= 8,
+    maxLength: formData.password.length <= 12 && formData.password.length > 0,
+    uppercase: /[A-Z]/.test(formData.password),
+    lowercase: /[a-z]/.test(formData.password),
+    number: /[0-9]/.test(formData.password),
+    special: /[^A-Za-z0-9]/.test(formData.password),
+  };
+
+  const allPasswordChecksPassed = Object.values(passwordChecks).every(Boolean);
 
   // Toggle between Support and Developer
   const handleRoleChange = (newRole: 'Support' | 'Developer') => {
@@ -56,10 +70,20 @@ export const SignupPage: React.FC = () => {
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
-    const { name, value } = e.target;
+    let { name, value } = e.target;
+    // Auto-uppercase Employee ID for consistent matching
+    if (name === 'employee_id') {
+      value = value.toUpperCase();
+    }
     setFormData((prev) => ({ ...prev, [name]: value }));
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+    if (serverError) {
+      setServerError('');
+    }
+    if (name === 'password' && confirmPassword && value === confirmPassword) {
+      setErrors((prev) => ({ ...prev, confirmPassword: '' }));
     }
   };
 
@@ -87,8 +111,13 @@ export const SignupPage: React.FC = () => {
       errs.email = 'Please enter a valid email address.';
     }
 
+    // Phone validation: allows 10-20 digits (handles optional spaces or +)
+    const phoneClean = formData.phone_number.trim().replace(/[\s-]/g, '');
+    const phoneRegex = /^\+?\d{10,20}$/;
     if (!formData.phone_number.trim()) {
       errs.phone_number = 'Phone number is required.';
+    } else if (!phoneRegex.test(phoneClean)) {
+      errs.phone_number = 'Phone number must be between 10 and 20 digits (e.g. 9876543210).';
     }
 
     // Role type validation only applies to Developer
@@ -96,13 +125,24 @@ export const SignupPage: React.FC = () => {
       errs.role_type = 'Developer Role Type is required.';
     }
 
+    // Password validation matching real-time checks
     if (!formData.password) {
       errs.password = 'Password is required.';
-    } else if (formData.password.length < 6) {
-      errs.password = 'Password must be at least 6 characters.';
+    } else if (formData.password.length < 8 || formData.password.length > 12) {
+      errs.password = 'Password must be between 8 and 12 characters.';
+    } else if (!/[A-Z]/.test(formData.password)) {
+      errs.password = 'Password must contain at least one uppercase letter (A-Z).';
+    } else if (!/[a-z]/.test(formData.password)) {
+      errs.password = 'Password must contain at least one lowercase letter (a-z).';
+    } else if (!/[0-9]/.test(formData.password)) {
+      errs.password = 'Password must contain at least one number (0-9).';
+    } else if (!/[^A-Za-z0-9]/.test(formData.password)) {
+      errs.password = 'Password must contain at least one special character (@, #, $, etc.).';
     }
 
-    if (formData.password !== confirmPassword) {
+    if (!confirmPassword) {
+      errs.confirmPassword = 'Confirm Password is required.';
+    } else if (formData.password !== confirmPassword) {
       errs.confirmPassword = 'Passwords do not match.';
     }
 
@@ -121,7 +161,11 @@ export const SignupPage: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const result = await signup(formData);
+      const submissionData: SignupFormData = {
+        ...formData,
+        confirm_password: confirmPassword || formData.confirm_password
+      };
+      const result = await signup(submissionData);
       setIsSubmitting(false);
 
       if (result.success) {
@@ -189,8 +233,8 @@ export const SignupPage: React.FC = () => {
 
               {/* Server Alert Message */}
               {serverError && (
-                <div className="alert alert-danger py-1.5 px-3 small rounded-3 d-flex align-items-center mb-2.5">
-                  <i className="bi bi-exclamation-triangle-fill me-2 flex-shrink-0"></i>
+                <div className="alert alert-danger py-2 px-3 small rounded-3 d-flex align-items-center mb-2.5">
+                  <i className="bi bi-exclamation-triangle-fill me-2 flex-shrink-0 fs-6"></i>
                   <span>{serverError}</span>
                 </div>
               )}
@@ -208,7 +252,7 @@ export const SignupPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Role Selection Tiles: ONLY TWO OPTIONS (Support & Developer) - Not selected by default */}
+              {/* Role Selection Tiles: ONLY TWO OPTIONS (Support & Developer) */}
               <div className="mb-3">
                 <div className="d-flex align-items-center justify-content-between mb-1.5">
                   <label className="form-label small fw-semibold text-muted mb-0">
@@ -225,7 +269,7 @@ export const SignupPage: React.FC = () => {
                     <div
                       className={`role-card-minimal py-2.5 px-2 text-center h-100 ${
                         formData.role === 'Support' ? 'selected' : ''
-                      }`}
+                      } ${errors.role ? 'border border-danger' : ''}`}
                       onClick={() => handleRoleChange('Support')}
                       role="button"
                       tabIndex={0}
@@ -256,7 +300,7 @@ export const SignupPage: React.FC = () => {
                     <div
                       className={`role-card-minimal py-2.5 px-2 text-center h-100 ${
                         formData.role === 'Developer' ? 'selected' : ''
-                      }`}
+                      } ${errors.role ? 'border border-danger' : ''}`}
                       onClick={() => handleRoleChange('Developer')}
                       role="button"
                       tabIndex={0}
@@ -311,6 +355,7 @@ export const SignupPage: React.FC = () => {
                         value={formData.employee_id}
                         onChange={handleChange}
                         required
+                        autoComplete="off"
                       />
                     </div>
                     {errors.employee_id && (
@@ -335,6 +380,7 @@ export const SignupPage: React.FC = () => {
                         value={formData.full_name}
                         onChange={handleChange}
                         required
+                        autoComplete="name"
                       />
                     </div>
                     {errors.full_name && (
@@ -359,6 +405,7 @@ export const SignupPage: React.FC = () => {
                         value={formData.email}
                         onChange={handleChange}
                         required
+                        autoComplete="email"
                       />
                     </div>
                     {errors.email && (
@@ -379,10 +426,11 @@ export const SignupPage: React.FC = () => {
                         type="tel"
                         name="phone_number"
                         className={`form-control custom-form-control ${errors.phone_number ? 'is-invalid border-danger' : ''}`}
-                        placeholder="e.g. +91 98765 43210"
+                        placeholder="e.g. 9876543210"
                         value={formData.phone_number}
                         onChange={handleChange}
                         required
+                        autoComplete="tel"
                       />
                     </div>
                     {errors.phone_number && (
@@ -453,11 +501,13 @@ export const SignupPage: React.FC = () => {
                       <input
                         type={showPassword ? 'text' : 'password'}
                         name="password"
+                        maxLength={12}
                         className={`form-control custom-form-control ${errors.password ? 'is-invalid border-danger' : ''}`}
-                        placeholder="Min 6 characters"
+                        placeholder="8-12 characters"
                         value={formData.password}
                         onChange={handleChange}
                         required
+                        autoComplete="new-password"
                       />
                       <button
                         type="button"
@@ -484,19 +534,35 @@ export const SignupPage: React.FC = () => {
                     <div className="input-icon-group">
                       <i className="bi bi-shield-lock leading-icon"></i>
                       <input
-                        type={showPassword ? 'text' : 'password'}
+                        type={showConfirmPassword ? 'text' : 'password'}
                         name="confirmPassword"
+                        maxLength={12}
                         className={`form-control custom-form-control ${errors.confirmPassword ? 'is-invalid border-danger' : ''}`}
                         placeholder="Re-type password"
                         value={confirmPassword}
                         onChange={(e) => {
-                          setConfirmPassword(e.target.value);
+                          const val = e.target.value;
+                          setConfirmPassword(val);
+                          setFormData((prev) => ({ ...prev, confirm_password: val }));
                           if (errors.confirmPassword) {
+                            setErrors((prev) => ({ ...prev, confirmPassword: '' }));
+                          }
+                          if (formData.password && val === formData.password) {
                             setErrors((prev) => ({ ...prev, confirmPassword: '' }));
                           }
                         }}
                         required
+                        autoComplete="new-password"
                       />
+                      <button
+                        type="button"
+                        className="trailing-btn"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                        tabIndex={-1}
+                      >
+                        <i className={`bi ${showConfirmPassword ? 'bi-eye-slash' : 'bi-eye'}`}></i>
+                      </button>
                     </div>
                     {errors.confirmPassword && (
                       <div className="text-danger small mt-0.5" style={{ fontSize: '0.72rem' }}>
@@ -504,6 +570,59 @@ export const SignupPage: React.FC = () => {
                       </div>
                     )}
                   </div>
+
+                  {/* Real-time Password Requirements Checklist: Spanning full width across col-12 for clean alignment */}
+                  {formData.password.length > 0 && (
+                    <div className="col-12">
+                      <div className="p-2.5 rounded-3 bg-light border border-light-subtle">
+                        <div className="d-flex align-items-center justify-content-between mb-1.5">
+                          <small className="fw-semibold text-navy" style={{ fontSize: '0.76rem' }}>
+                            Password Requirements
+                          </small>
+                          {allPasswordChecksPassed ? (
+                            <span className="badge bg-success-subtle text-success small fw-semibold">
+                              <i className="bi bi-shield-check me-1"></i>Requirements met
+                            </span>
+                          ) : (
+                            <span className="text-muted small" style={{ fontSize: '0.72rem' }}>
+                              8-12 characters with mixed case, number & special char
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="row g-1.5">
+                          {[
+                            { key: 'minLength', label: 'At least 8 characters' },
+                            { key: 'maxLength', label: 'Maximum 12 characters' },
+                            { key: 'uppercase', label: 'One uppercase letter (A-Z)' },
+                            { key: 'lowercase', label: 'One lowercase letter (a-z)' },
+                            { key: 'number', label: 'One number (0-9)' },
+                            { key: 'special', label: 'One special character (@, #, $)' },
+                          ].map((item) => {
+                            const isValid = passwordChecks[item.key as keyof typeof passwordChecks];
+
+                            return (
+                              <div key={item.key} className="col-12 col-sm-6 col-md-4">
+                                <div
+                                  className={`d-flex align-items-center gap-1.5 small ${
+                                    isValid ? 'text-success fw-medium' : 'text-secondary'
+                                  }`}
+                                  style={{ fontSize: '0.74rem' }}
+                                >
+                                  <i
+                                    className={`bi ${
+                                      isValid ? 'bi-check-circle-fill text-success' : 'bi-circle text-muted'
+                                    }`}
+                                  ></i>
+                                  <span>{item.label}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                 </div>
 

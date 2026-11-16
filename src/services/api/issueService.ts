@@ -1,4 +1,4 @@
-import { Issue, DiscussionMessage, ProjectItem, DeveloperItem } from '../../types/issue';
+import { Issue, DiscussionMessage, ProjectItem, DeveloperItem, PaginatedIssuesResponse, FetchIssuesParams } from '../../types/issue';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
 
@@ -55,6 +55,119 @@ export function normalizeIssue(item: any): Issue {
     rca: item.rca || undefined,
     resolvedDate: item.resolved_at || item.resolvedDate || undefined,
     isEligibleForDelete: status === 'Open'
+  };
+}
+
+
+/**
+ * Convert supported backend pagination formats into one frontend format.
+ * Expected server-side response: items/results + total/count + page metadata.
+ * Deliberately does not slice an unpaginated array in the browser.
+ */
+function normalizePaginatedIssuesResponse(
+  responseJson: any,
+  requestedPage: number,
+  requestedPageSize: number
+): PaginatedIssuesResponse | null {
+  if (!responseJson || typeof responseJson !== 'object' || Array.isArray(responseJson)) {
+    return null;
+  }
+
+  const payload = responseJson.data && !Array.isArray(responseJson.data) && typeof responseJson.data === 'object'
+    ? responseJson.data
+    : responseJson;
+
+  const rawItems = Array.isArray(payload.items)
+    ? payload.items
+    : Array.isArray(payload.results)
+      ? payload.results
+      : Array.isArray(payload.issues)
+        ? payload.issues
+        : Array.isArray(payload.data)
+          ? payload.data
+          : null;
+
+  if (!rawItems) return null;
+
+  const items = rawItems.map(normalizeIssue);
+
+  // Read from nested pagination object if present (e.g. payload.pagination) or flat payload
+  const paginationObj = payload.pagination && typeof payload.pagination === 'object' ? payload.pagination : {};
+
+  const totalValue =
+    paginationObj.total_items ??
+    paginationObj.total ??
+    paginationObj.count ??
+    payload.total_items ??
+    payload.total ??
+    payload.count;
+  const total = typeof totalValue === 'number' ? totalValue : items.length;
+
+  const pageValue =
+    paginationObj.current_page ??
+    paginationObj.page ??
+    payload.current_page ??
+    payload.page;
+  const page = typeof pageValue === 'number' ? pageValue : requestedPage;
+
+  const pageSizeValue =
+    paginationObj.page_size ??
+    paginationObj.pageSize ??
+    paginationObj.per_page ??
+    payload.page_size ??
+    payload.pageSize ??
+    payload.per_page;
+  const pageSize = typeof pageSizeValue === 'number' ? pageSizeValue : requestedPageSize;
+
+  const totalPagesValue =
+    paginationObj.total_pages ??
+    paginationObj.totalPages ??
+    paginationObj.num_pages ??
+    payload.total_pages ??
+    payload.totalPages ??
+    payload.num_pages;
+  const totalPages = typeof totalPagesValue === 'number'
+    ? totalPagesValue
+    : Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+
+  const hasNextValue =
+    paginationObj.has_next ??
+    paginationObj.hasNext ??
+    payload.has_next ??
+    payload.hasNext;
+
+  const hasPreviousValue =
+    paginationObj.has_previous ??
+    paginationObj.hasPrevious ??
+    payload.has_previous ??
+    payload.hasPrevious;
+
+  const hasNext = typeof hasNextValue === 'boolean'
+    ? hasNextValue
+    : Boolean(paginationObj.next || payload.next) || page < totalPages;
+
+  const hasPrevious = typeof hasPreviousValue === 'boolean'
+    ? hasPreviousValue
+    : Boolean(paginationObj.previous || payload.previous) || page > 1;
+
+  const pagination = {
+    total_items: total,
+    total_pages: totalPages,
+    current_page: page,
+    has_next: hasNext,
+    has_previous: hasPrevious,
+    page_size: pageSize
+  };
+
+  return {
+    items,
+    pagination,
+    total,
+    page,
+    pageSize,
+    totalPages,
+    hasNext,
+    hasPrevious
   };
 }
 
@@ -161,31 +274,69 @@ export async function apiFetchDevelopers(): Promise<{ success: boolean; data: De
  * Fetch My Issues from backend API:
  * GET http://10.91.17.113:8000/api/v1/my-issues/
  */
-export async function apiFetchMyIssues(): Promise<{ success: boolean; data?: Issue[]; message?: string }> {
+export async function apiFetchMyIssues(
+  params?: FetchIssuesParams
+): Promise<{ success: boolean; data?: PaginatedIssuesResponse; message?: string }> {
+  const requestedPage = params?.page ?? 1;
+  const requestedPageSize = params?.pageSize ?? 10;
+  const query = new URLSearchParams({
+    page: String(requestedPage),
+    page_size: String(requestedPageSize)
+  });
+
+  if (params?.project && params.project !== 'All') query.append('project', params.project);
+  if (params?.issueType && params.issueType !== 'All') query.append('issue_type', params.issueType);
+  if (params?.date) query.append('date', params.date);
+  if (params?.shift && params.shift !== 'All') query.append('shift', params.shift);
+  if (params?.status && params.status !== 'All') query.append('status', params.status);
+  if (params?.search?.trim()) query.append('search', params.search.trim());
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-    const response = await fetch(`${API_BASE_URL}/my-issues`, {
+    let response = await fetch(`${API_BASE_URL}/my-issues/?${query.toString()}`, {
       method: 'GET',
       headers: getAuthHeaders(),
       signal: controller.signal
-    });
+    }).catch(() => null);
+
+    // Support deployments whose router is configured without a trailing slash.
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/my-issues?${query.toString()}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
 
     clearTimeout(timeoutId);
+
+    if (!response) {
+      return {
+        success: false,
+        message: `Failed to connect to backend server at ${API_BASE_URL}. Ensure server is online.`
+      };
+    }
 
     if (!response.ok) {
       return {
         success: false,
-        message: `Backend returned error ${response.status} when fetching My Issues from ${API_BASE_URL}/my-issues/`
+        message: `Backend returned error ${response.status} when fetching My Issues.`
       };
     }
 
     const json = await response.json();
-    const rawList = Array.isArray(json) ? json : json.data || json.issues || json.results || [];
-    const issues = rawList.map(normalizeIssue);
+    const data = normalizePaginatedIssuesResponse(json, requestedPage, requestedPageSize);
 
-    return { success: true, data: issues };
+    if (!data) {
+      return {
+        success: false,
+        message: 'My Issues API must return a paginated object containing items/results and pagination metadata. An unpaginated array is not supported.'
+      };
+    }
+
+    return { success: true, data };
   } catch (error: any) {
     return {
       success: false,
@@ -195,39 +346,295 @@ export async function apiFetchMyIssues(): Promise<{ success: boolean; data?: Iss
 }
 
 /**
- * Fetch Previous Issues from backend API:
- * GET http://10.91.17.113:8000/api/v1/previous-issues/
+ * Fetch Previous Issues from backend API with pagination and filter support:
+ * GET http://10.91.17.113:8000/api/v1/previous-issues/?page=1&page_size=10
  */
-export async function apiFetchPreviousIssues(): Promise<{ success: boolean; data?: Issue[]; message?: string }> {
+export async function apiFetchPreviousIssues(
+  params?: FetchIssuesParams
+): Promise<{ success: boolean; data?: PaginatedIssuesResponse; message?: string }> {
+  const requestedPage = params?.page ?? 1;
+  const requestedPageSize = params?.pageSize ?? 10;
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const query = new URLSearchParams();
 
-    const response = await fetch(`${API_BASE_URL}/previous-issues`, {
+    query.append('page', String(requestedPage));
+    query.append('page_size', String(requestedPageSize));
+
+    if (params?.project && params.project !== 'All') query.append('project', params.project);
+    if (params?.issueType && params.issueType !== 'All') query.append('issue_type', params.issueType);
+    if (params?.date) query.append('date', params.date);
+    if (params?.shift && params.shift !== 'All') query.append('shift', params.shift);
+    if (params?.status && params.status !== 'All') query.append('status', params.status);
+    if (params?.search?.trim()) query.append('search', params.search.trim());
+
+    const qs = query.toString();
+    let response = await fetch(`${API_BASE_URL}/previous-issues/?${qs}`, {
       method: 'GET',
       headers: getAuthHeaders(),
       signal: controller.signal
-    });
+    }).catch(() => null);
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/previous-issues?${qs}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
 
     clearTimeout(timeoutId);
+
+    if (!response) {
+      return {
+        success: false,
+        message: `Failed to connect to backend server at ${API_BASE_URL}. Ensure server is online.`
+      };
+    }
 
     if (!response.ok) {
       return {
         success: false,
-        message: `Backend returned error ${response.status} when fetching Previous Issues from ${API_BASE_URL}/previous-issues/`
+        message: `Backend returned error ${response.status} when fetching Previous Issues.`
       };
     }
 
     const json = await response.json();
-    const rawList = Array.isArray(json) ? json : json.data || json.issues || json.results || [];
-    const issues = rawList.map(normalizeIssue);
+    const data = normalizePaginatedIssuesResponse(json, requestedPage, requestedPageSize);
 
-    return { success: true, data: issues };
+    if (!data) {
+      return {
+        success: false,
+        message: 'Previous Issues API must return a paginated object containing items/results and pagination metadata. An unpaginated array is not supported.'
+      };
+    }
+
+    return { success: true, data };
   } catch (error: any) {
     return {
       success: false,
       message: error.name === 'AbortError' ? 'Previous Issues API request timed out.' : error.message
     };
+  }
+}
+
+/**
+ * Fetch Project Names for Previous Issues:
+ * GET /api/v1/previous-issues/projects
+ */
+export async function apiFetchPreviousIssuesProjects(): Promise<{ success: boolean; data: string[]; message?: string }> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let response = await fetch(`${API_BASE_URL}/previous-issues/projects`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      signal: controller.signal
+    }).catch(() => null);
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/previous-issues/projects/`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/issues/projects/`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    clearTimeout(timeoutId);
+
+    if (response && response.ok) {
+      const json = await response.json();
+      const rawList = Array.isArray(json) ? json : json.data || json.projects || json.items || [];
+      const names: string[] = rawList
+        .map((p: any) => (typeof p === 'string' ? p : p.project_name || p.name || p.title || p.id))
+        .filter((n: any) => typeof n === 'string' && n.trim().length > 0);
+      if (names.length > 0) {
+        return { success: true, data: Array.from(new Set(names)) };
+      }
+    }
+  } catch (err: any) {
+    console.warn('Could not fetch previous-issues projects:', err.message);
+  }
+
+  return {
+    success: false,
+    data: []
+  };
+}
+
+/**
+ * Fetch Project Names for My Issues:
+ * GET /api/v1/my-issues/projects
+ */
+export async function apiFetchMyIssuesProjects(): Promise<{ success: boolean; data: string[]; message?: string }> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let response = await fetch(`${API_BASE_URL}/my-issues/projects`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      signal: controller.signal
+    }).catch(() => null);
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/my-issues/projects/`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/issues/projects/`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    clearTimeout(timeoutId);
+
+    if (response && response.ok) {
+      const json = await response.json();
+      const rawList = Array.isArray(json) ? json : json.data || json.projects || json.items || [];
+      const names: string[] = rawList
+        .map((p: any) => (typeof p === 'string' ? p : p.project_name || p.name || p.title || p.id))
+        .filter((n: any) => typeof n === 'string' && n.trim().length > 0);
+      if (names.length > 0) {
+        return { success: true, data: Array.from(new Set(names)) };
+      }
+    }
+  } catch (err: any) {
+    console.warn('Could not fetch my-issues projects:', err.message);
+  }
+
+  return {
+    success: false,
+    data: []
+  };
+}
+
+/**
+ * Fetch a single issue by ID from the backend API
+ */
+export async function apiFetchIssueById(issueId: string): Promise<{ success: boolean; data?: Issue; message?: string }> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let response = await fetch(`${API_BASE_URL}/my-issues/${issueId}/`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      signal: controller.signal
+    }).catch(() => null);
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/previous-issues/${issueId}/`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/issues/${issueId}/`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        signal: controller.signal
+      }).catch(() => null);
+    }
+
+    clearTimeout(timeoutId);
+
+    if (response && response.ok) {
+      const json = await response.json();
+      const raw = json.data || json.issue || json;
+      return { success: true, data: normalizeIssue(raw) };
+    }
+
+    return { success: false, message: 'Issue not found on server' };
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Update an issue on the backend
+ */
+export async function apiUpdateIssue(
+  issueId: string,
+  updatedFields: Partial<Issue>
+): Promise<{ success: boolean; data?: Issue; message?: string }> {
+  try {
+    const payload: Record<string, any> = {};
+    if (updatedFields.title) {
+      payload.issue_title = updatedFields.title;
+      payload.title = updatedFields.title;
+    }
+    if (updatedFields.description) {
+      payload.issue_description = updatedFields.description;
+      payload.description = updatedFields.description;
+    }
+    if (updatedFields.projectId) {
+      payload.project_id = updatedFields.projectId;
+      payload.projectId = updatedFields.projectId;
+    }
+    if (updatedFields.issueType) {
+      payload.issue_type = updatedFields.issueType;
+      payload.issueType = updatedFields.issueType;
+    }
+    if (updatedFields.occurrenceTime) {
+      payload.issue_time = updatedFields.occurrenceTime;
+      payload.occurrenceTime = updatedFields.occurrenceTime;
+    }
+    if (updatedFields.status) {
+      payload.issue_status = updatedFields.status;
+      payload.status = updatedFields.status;
+    }
+    if (updatedFields.priority) {
+      payload.issue_priority = updatedFields.priority;
+      payload.priority = updatedFields.priority;
+    }
+    if (updatedFields.rca) {
+      payload.rca = updatedFields.rca;
+    }
+
+    let response = await fetch(`${API_BASE_URL}/my-issues/${issueId}/`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload)
+    }).catch(() => null);
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/issues/${issueId}/`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      }).catch(() => null);
+    }
+
+    if (response && response.ok) {
+      const json = await response.json().catch(() => null);
+      if (json) {
+        return { success: true, data: normalizeIssue(json.data || json) };
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, message: err.message };
   }
 }
 

@@ -2,7 +2,9 @@ import React from 'react';
 
 export const LoginHeroGraphic: React.FC<{ className?: string }> = ({ className = '' }) => {
   return (
-    <div className={`position-relative w-100 d-flex justify-content-center align-items-center ${className}`}>
+    <div className={`position-relative w-100 d-flex justify-content-center align-items-center ${className}`}
+         style={{ transform: 'translate(-40px,-80px)' }}
+    >
       <svg
         viewBox="0 0 540 380"
         fill="none"
