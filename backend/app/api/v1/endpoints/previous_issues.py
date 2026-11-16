@@ -26,7 +26,9 @@ router = APIRouter(
 
 
 # Get Previous Issues with filters
-@router.get("", response_model=list[PreviousIssueResponse])
+
+# Get Previous Issues with filters and pagination
+@router.get("")
 def read_previous_issues(
     search: str | None = Query(default=None),
     project_name: str | None = Query(default=None),
@@ -35,9 +37,14 @@ def read_previous_issues(
     issue_status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+
+    # Pagination
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+
     db: Session = Depends(get_db),
 ):
-    return get_previous_issues(
+    issues, total = get_previous_issues(
         db=db,
         search=search,
         project_name=project_name,
@@ -46,7 +53,18 @@ def read_previous_issues(
         issue_status=issue_status,
         date_from=date_from,
         date_to=date_to,
+        page=page,
+        page_size=page_size,
     )
+
+    return {
+        "items": issues,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
 
 
 # Get project names for Previous Issues dropdown

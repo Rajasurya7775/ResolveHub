@@ -1,7 +1,8 @@
+
 from datetime import date, datetime, time, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Issue, Project
@@ -16,7 +17,22 @@ def get_previous_issues(
     issue_status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ):
+    # Validate pagination
+    if page < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Page must be greater than or equal to 1",
+        )
+
+    if page_size < 1 or page_size > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Page size must be between 1 and 100",
+        )
+
     # Validate date range
     if date_from and date_to and date_from > date_to:
         raise HTTPException(
@@ -58,7 +74,9 @@ def get_previous_issues(
     # Filter from date
     if date_from:
         start_datetime = datetime.combine(date_from, time.min)
-        query = query.where(Issue.issue_created_at >= start_datetime)
+        query = query.where(
+            Issue.issue_created_at >= start_datetime
+        )
 
     # Filter to date (include entire day)
     if date_to:
@@ -66,9 +84,28 @@ def get_previous_issues(
             date_to + timedelta(days=1),
             time.min,
         )
-        query = query.where(Issue.issue_created_at < end_datetime)
+        query = query.where(
+            Issue.issue_created_at < end_datetime
+        )
 
-    # Newest issues first
-    query = query.order_by(Issue.issue_created_at.desc())
+    # Count all matching issues before pagination
+    total = db.scalar(
+        select(func.count()).select_from(
+            query.order_by(None).subquery()
+        )
+    ) or 0
 
-    return db.scalars(query).unique().all()
+    # Apply pagination
+    paged_query = (
+        query
+        .order_by(
+            Issue.issue_created_at.desc(),
+            Issue.issue_id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    issues = db.scalars(paged_query).unique().all()
+
+    return issues, total

@@ -36,6 +36,8 @@ def get_my_issue_projects(
 
 
 # Get My Issues with filters and pagination
+
+# Get My Issues with filters and pagination
 @router.get("")
 def read_my_issues(
     search: str | None = Query(default=None),
@@ -66,6 +68,15 @@ def read_my_issues(
         page=page,
         page_size=page_size,
     )
+
+    return {
+        "items": issues,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
 
 
 # Get detailed issue when user clicks an issue
