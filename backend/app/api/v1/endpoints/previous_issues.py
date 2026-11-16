@@ -1,15 +1,23 @@
 
-from math import ceil
+from sqlalchemy import select
+from app.models import Project, User
 from datetime import date
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Project
 from app.schemas.previous_issue import PreviousIssueResponse
+from app.schemas.issue import IssueUpdate
 from app.services.previous_issue_service import get_previous_issues
+from app.services.issue_service import (
+    get_issue_details,
+    update_issue,
+    delete_issue,
+)
+from app.api.deps import get_current_user
+
 
 router = APIRouter(
     prefix="/previous-issues",
@@ -17,8 +25,8 @@ router = APIRouter(
 )
 
 
-# GET: Fetch all issues with filters and pagination
-@router.get("")
+# Get Previous Issues with filters
+@router.get("", response_model=list[PreviousIssueResponse])
 def read_previous_issues(
     search: str | None = Query(default=None),
     project_name: str | None = Query(default=None),
@@ -27,11 +35,9 @@ def read_previous_issues(
     issue_status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    issues, total = get_previous_issues(
+    return get_previous_issues(
         db=db,
         search=search,
         project_name=project_name,
@@ -40,33 +46,10 @@ def read_previous_issues(
         issue_status=issue_status,
         date_from=date_from,
         date_to=date_to,
-        page=page,
-        page_size=page_size,
     )
 
-    total_pages = ceil(total / page_size) if total else 0
 
-    return {
-        "success": True,
-        "message": "Issues fetched successfully",
-        "data": {
-            "items": [
-                PreviousIssueResponse.model_validate(issue)
-                for issue in issues
-            ],
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_items": total,
-                "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_previous": page > 1 and total_pages > 0,
-            },
-        },
-    }
-
-
-# GET: Load project names for filters
+# Get project names for Previous Issues dropdown
 @router.get("/projects", response_model=list[str])
 def get_project_names(db: Session = Depends(get_db)):
     query = (
@@ -76,3 +59,39 @@ def get_project_names(db: Session = Depends(get_db)):
     )
 
     return db.scalars(query).all()
+
+
+# Get detailed issue when user clicks an issue
+@router.get("/{issue_id}", response_model=PreviousIssueResponse)
+def read_previous_issue_details(
+    issue_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_issue_details(db, current_user, issue_id)
+
+
+# Update issue
+@router.patch("/{issue_id}", response_model=PreviousIssueResponse)
+def edit_previous_issue(
+    issue_id: UUID,
+    issue_data: IssueUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return update_issue(
+        db=db,
+        current_user=current_user,
+        issue_id=issue_id,
+        update_data=issue_data.model_dump(exclude_unset=True),
+    )
+
+
+# Delete issue
+@router.delete("/{issue_id}")
+def remove_previous_issue(
+    issue_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return delete_issue(db, current_user, issue_id)

@@ -1,315 +1,174 @@
-from datetime import datetime
-from typing import Any
+
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import HTTPException, status
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
-from app.core.enums import IssuePriority, IssueType
-from app.models.issue import Issue
-from app.models.project import Project
-from app.schemas.issue import IssueCreate
-from app.utils.issue_code import generate_issue_number
-from app.utils.shifts import APP_TZ, get_shift, previous_shift
+from app.core.enums import Role, AccountStatus
+from app.models import Issue, Project, User
 
 
-# --------------------------------------------------
-# CREATE ISSUE
-# --------------------------------------------------
+def _role_value(user):
+    value = getattr(user.role, "value", user.role)
+    return str(value).strip().upper()
 
-def create_issue(
-    db: Session,
-    issue_data: IssueCreate,
-    user_id: int
-) -> Issue:
 
-    project = db.get(Project, issue_data.project_id)
+def _get_authorized_user(current_user: User):
+    role = _role_value(current_user)
 
-    if project is None:
+    if role not in ("SUPPORTER", "SUPPORT", "DEVELOPER"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
+            status_code=403,
+            detail="You are not authorized to manage issues."
         )
 
-    now = datetime.now(APP_TZ)
-    shift, shift_date = get_shift(now)
 
-    issue_number = generate_issue_number(db)
-
-    new_issue = Issue(
-        issue_number=issue_number,
-        project_id=issue_data.project_id,
-        issue_shift=shift,
-        shift_date=shift_date,
-        issue_time=now.replace(tzinfo=None),
-        issue_title=issue_data.issue_title,
-        issue_type=issue_data.issue_type.value,
-        issue_description=issue_data.issue_description,
-        issue_priority=issue_data.issue_priority.value,
-        issue_status="OPEN",
-        issue_created_by=user_id
+def _get_issue(db: Session, issue_id: UUID):
+    query = (
+        select(Issue)
+        .options(selectinload(Issue.project))
+        .where(Issue.issue_id == issue_id)
     )
 
-    try:
-        db.add(new_issue)
-        db.commit()
-        db.refresh(new_issue)
-    except Exception:
-        db.rollback()
-        raise
+    issue = db.scalars(query).first()
 
-    return new_issue
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found.")
+
+    return issue
 
 
-# --------------------------------------------------
-# COMMON FILTERING FUNCTION
-# --------------------------------------------------
-
-def apply_issue_filters(
-    query,
-    project_id: int | None = None,
-    issue_status: str | None = None,
-    issue_priority: str | None = None,
-    issue_type: str | None = None,
-    search: str | None = None,
-):
-
-    if project_id is not None:
-        query = query.filter(Issue.project_id == project_id)
-
-    if issue_status:
-        query = query.filter(Issue.issue_status == issue_status)
-
-    if issue_priority:
-        query = query.filter(Issue.issue_priority == issue_priority)
-
-    if issue_type:
-        query = query.filter(Issue.issue_type == issue_type)
-
-    if search:
-        search_term = f"%{search.strip()}%"
-        query = query.filter(
-            or_(
-                Issue.issue_number.ilike(search_term),
-                Issue.issue_title.ilike(search_term)
-            )
-        )
-
-    return query
-
-
-# --------------------------------------------------
-# COMMON PAGINATION FUNCTION
-# --------------------------------------------------
-
-def paginate_issues(
-    query,
-    page: int = 1,
-    page_size: int = 10
-) -> tuple[list[Issue], int]:
-
-    if page < 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Page must be greater than 0"
-        )
-
-    if not 1 <= page_size <= 100:
-        raise HTTPException(
-            status_code=400,
-            detail="Page size must be between 1 and 100"
-        )
-
-    total = query.count()
-
-    issues = (
-        query
-        .order_by(Issue.issue_created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-
-    return issues, total
-
-
-# --------------------------------------------------
-# MY ISSUES
-# --------------------------------------------------
-
-def get_my_issues(
+def get_issue_details(
     db: Session,
-    user_id: int,
-    project_id: int | None = None,
-    issue_status: str | None = None,
-    issue_priority: str | None = None,
-    issue_type: str | None = None,
-    search: str | None = None,
-    page: int = 1,
-    page_size: int = 10
-) -> tuple[list[Issue], int]:
-
-    query = db.query(Issue).filter(
-        Issue.issue_created_by == user_id,
-        Issue.deleted_at.is_(None)
-    )
-
-    query = apply_issue_filters(
-        query,
-        project_id,
-        issue_status,
-        issue_priority,
-        issue_type,
-        search
-    )
-
-    return paginate_issues(query, page, page_size)
-
-
-# --------------------------------------------------
-# PREVIOUS SHIFT ISSUES
-# --------------------------------------------------
-
-def get_previous_shift_issues(
-    db: Session,
-    project_id: int | None = None,
-    issue_status: str | None = None,
-    issue_priority: str | None = None,
-    issue_type: str | None = None,
-    search: str | None = None,
-    page: int = 1,
-    page_size: int = 20
-) -> tuple[list[Issue], int]:
-
-    now = datetime.now(APP_TZ)
-
-    current_shift, current_shift_date = get_shift(now)
-
-    previous_shift_name, previous_shift_date = previous_shift(
-        current_shift,
-        current_shift_date
-    )
-
-    query = db.query(Issue).filter(
-        Issue.issue_shift == previous_shift_name,
-        Issue.shift_date == previous_shift_date,
-        Issue.deleted_at.is_(None)
-    )
-
-    query = apply_issue_filters(
-        query,
-        project_id,
-        issue_status,
-        issue_priority,
-        issue_type,
-        search
-    )
-
-    return paginate_issues(query, page, page_size)
-
-
-# --------------------------------------------------
-# OVERALL ISSUES
-# --------------------------------------------------
-
-def get_overall_issues(
-    db: Session,
-    project_id: int | None = None,
-    issue_status: str | None = None,
-    issue_priority: str | None = None,
-    issue_type: str | None = None,
-    search: str | None = None,
-    page: int = 1,
-    page_size: int = 10
-) -> tuple[list[Issue], int]:
-
-    query = db.query(Issue).filter(
-        Issue.deleted_at.is_(None)
-    )
-
-    query = apply_issue_filters(
-        query,
-        project_id,
-        issue_status,
-        issue_priority,
-        issue_type,
-        search
-    )
-
-    return paginate_issues(query, page, page_size)
-
-
-# --------------------------------------------------
-# GET ISSUE BY ID
-# --------------------------------------------------
-
-def get_issue_by_id(
-    db: Session,
+    current_user: User,
     issue_id: UUID
-) -> Issue | None:
+):
+    _get_authorized_user(current_user)
+    return _get_issue(db, issue_id)
 
-    return db.query(Issue).filter(
-        Issue.issue_id == issue_id,
-        Issue.deleted_at.is_(None)
-    ).first()
-
-
-# --------------------------------------------------
-# UPDATE ISSUE
-# --------------------------------------------------
 
 def update_issue(
     db: Session,
-    issue: Issue,
-    update_data: dict[str, Any]
-) -> Issue:
+    current_user: User,
+    issue_id: UUID,
+    update_data: dict
+):
+    _get_authorized_user(current_user)
 
-    allowed_fields = {
+    issue = _get_issue(db, issue_id)
+    data = update_data.copy()
+
+    # Validate project
+    if "project_id" in data:
+        if data["project_id"] is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Project cannot be empty."
+            )
+
+        if db.get(Project, data["project_id"]) is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Project not found."
+            )
+
+    # Validate required fields if supplied
+    required_fields = [
         "issue_title",
         "issue_type",
         "issue_description",
-        "issue_priority",
-        "rca"
-    }
+        "issue_status",
+    ]
 
-    for field, value in update_data.items():
-        if field not in allowed_fields:
-            raise ValueError(f"Field cannot be updated: {field}")
+    for field in required_fields:
+        if field in data and (
+            data[field] is None or not str(data[field]).strip()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field} cannot be empty."
+            )
 
-        if field in {"issue_type", "issue_priority"} and value is not None:
-            value = value.value if hasattr(value, "value") else value
+    # Validate developer assignment
+    if "assigned_to" in data:
+        new_assignee_id = data.pop("assigned_to")
+
+        if new_assignee_id is not None:
+            developer = db.get(User, new_assignee_id)
+
+            if developer is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Assigned developer not found."
+                )
+
+            developer_role = _role_value(developer)
+            account_status = getattr(
+                developer.account_status,
+                "value",
+                developer.account_status
+            )
+
+            if (
+                developer_role != "DEVELOPER"
+                or str(account_status).upper() != "ACTIVE"
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Please select an active developer."
+                )
+
+        if issue.assigned_to != new_assignee_id:
+            issue.assigned_to = new_assignee_id
+            issue.assigned_at = (
+                datetime.utcnow()
+                if new_assignee_id is not None
+                else None
+            )
+
+    # Update remaining supplied fields
+    for field, value in data.items():
+        if field == "issue_priority" and value is not None:
+            value = str(value)
 
         setattr(issue, field, value)
 
     try:
         db.commit()
-        db.refresh(issue)
+        return _get_issue(db, issue_id)
+
     except Exception:
         db.rollback()
-        raise
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to update issue."
+        )
 
-    return issue
 
-
-# --------------------------------------------------
-# SOFT DELETE ISSUE
-# --------------------------------------------------
 
 def delete_issue(
     db: Session,
-    issue: Issue,
-    deleted_by: int
-) -> Issue:
+    current_user: User,
+    issue_id: UUID
+):
+    _get_authorized_user(current_user)
 
-    issue.deleted_at = datetime.now(APP_TZ).replace(tzinfo=None)
-    issue.deleted_by = deleted_by
+    issue = _get_issue(db, issue_id)
 
     try:
+        # Load associated messages before deleting the issue
+        list(issue.messages)
+
+        db.delete(issue)
         db.commit()
-        db.refresh(issue)
+
+        return {"message": "Issue deleted successfully."}
+
     except Exception:
         db.rollback()
-        raise
-
-    return issue
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to delete issue."
+        )

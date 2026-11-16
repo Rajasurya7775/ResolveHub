@@ -22,7 +22,7 @@ router = APIRouter(
 )
 
 
-# GET: Load active projects for the Report Issue dropdown
+# GET: Load active projects
 @router.get(
     "/projects",
     response_model=list[ProjectDropdownResponse],
@@ -35,7 +35,7 @@ def get_issue_projects(
     return db.scalars(query).all()
 
 
-# GET: Load only active developers for the Assigned To dropdown
+# GET: Load active developers
 @router.get(
     "/developers",
     response_model=list[DeveloperDropdownResponse],
@@ -52,7 +52,6 @@ def get_issue_developers(
         )
         .order_by(User.full_name.asc())
     )
-
     return db.scalars(query).all()
 
 
@@ -67,6 +66,7 @@ def create_issue(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Validate project
     project = db.get(Project, issue_data.project_id)
 
     if project is None:
@@ -75,6 +75,7 @@ def create_issue(
             detail="Selected project does not exist.",
         )
 
+    # Validate selected developer
     if issue_data.assigned_to is not None:
         developer = db.get(User, issue_data.assigned_to)
 
@@ -88,6 +89,7 @@ def create_issue(
                 detail="Selected developer is not active or valid.",
             )
 
+    # Generate unique issue number
     issue_number = f"ISS-{uuid4().hex[:10].upper()}"
 
     new_issue = Issue(
@@ -107,12 +109,28 @@ def create_issue(
 
     try:
         db.add(new_issue)
+
+        # Insert issue and retrieve database-generated timestamp
+        db.flush()
+        db.refresh(
+            new_issue,
+            attribute_names=["issue_created_at"],
+        )
+
+        # Set assigned timestamp equal to creation timestamp
+        new_issue.assigned_at = new_issue.issue_created_at
+
+        # Save both timestamps
         db.commit()
         db.refresh(new_issue)
+
         return new_issue
 
-    except Exception:
+    except Exception as e:
         db.rollback()
+
+        print("ISSUE CREATION ERROR:", str(e))
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to create issue. Please try again.",

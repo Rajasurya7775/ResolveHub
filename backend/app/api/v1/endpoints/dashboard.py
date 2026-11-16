@@ -1,5 +1,5 @@
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import case, func
@@ -11,29 +11,48 @@ from app.db.session import get_db
 from app.models import User, Issue
 from app.schemas.dashboard import CurrentShiftResponse, DashboardSummary
 from app.services import dashboard_service
+from app.services.dashboard_service import get_user_issue_filter
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
+# --------------------------------------------------
+# SUMMARY - SUPPORTER AND DEVELOPER
+# --------------------------------------------------
+
 @router.get("/summary", response_model=DashboardSummary)
 def summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(Role.SUPPORTER)),
+    current_user: User = Depends(
+        require_roles(Role.SUPPORTER, Role.DEVELOPER)
+    ),
 ):
     return dashboard_service.get_summary(db, current_user)
 
 
+# --------------------------------------------------
+# CURRENT SHIFT - SUPPORTER AND DEVELOPER
+# --------------------------------------------------
+
 @router.get("/current-shift", response_model=CurrentShiftResponse)
 def current_shift(
-    current_user: User = Depends(require_roles(Role.SUPPORTER)),
+    current_user: User = Depends(
+        require_roles(Role.SUPPORTER, Role.DEVELOPER)
+    ),
 ):
     return dashboard_service.get_current_shift()
 
 
+# --------------------------------------------------
+# ISSUE TRENDS - SUPPORTER AND DEVELOPER
+# --------------------------------------------------
+
 @router.get("/issue-trends")
 def issue_trends(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(Role.SUPPORTER)),
+    current_user: User = Depends(
+        require_roles(Role.SUPPORTER, Role.DEVELOPER)
+    ),
 ):
     # Calculate current calendar week (Monday to Sunday)
     today = date.today()
@@ -66,7 +85,7 @@ def issue_trends(
             ).label("resolved_tickets"),
         )
         .filter(
-            Issue.issue_created_by == current_user.user_id,
+            get_user_issue_filter(current_user),
             Issue.issue_time >= start_datetime,
             Issue.issue_time < end_datetime,
         )
@@ -145,13 +164,17 @@ def issue_trends(
     }
 
 
+# --------------------------------------------------
+# ISSUE TYPE DISTRIBUTION - SUPPORTER ONLY
+# --------------------------------------------------
+
 @router.get("/issue-type-distribution")
 def issue_type_distribution(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(Role.SUPPORTER)),
+    current_user: User = Depends(
+        require_roles(Role.SUPPORTER)
+    ),
 ):
-    from datetime import datetime, timedelta, timezone
-
     # Category configuration
     categories = ["Front-end", "Backend", "Database", "Others"]
 
@@ -167,10 +190,12 @@ def issue_type_distribution(
         else:
             return "Others"
 
-    # Fetch issues belonging to the logged-in user
+    # Fetch issues belonging to the logged-in supporter
     issues = (
         db.query(Issue)
-        .filter(Issue.issue_created_by == current_user.user_id)
+        .filter(
+            Issue.issue_created_by == current_user.user_id
+        )
         .all()
     )
 
@@ -308,3 +333,17 @@ def issue_type_distribution(
             "average_resolution_by_type": average_resolution,
         },
     }
+
+# --------------------------------------------------
+# Weekly Priority Distribution - DEVELOPER ONLY
+# --------------------------------------------------
+
+@router.get("/weekly-priority-distribution")
+def weekly_priority_distribution(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(Role.DEVELOPER)),
+):
+    return dashboard_service.get_weekly_priority_distribution(
+        db,
+        current_user
+    )

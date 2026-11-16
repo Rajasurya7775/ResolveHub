@@ -26,13 +26,34 @@ def get_my_issues(
             detail="From date cannot be later than To date",
         )
 
-    # Get issues created by the logged-in user
-    # Load the related project so project_name is available
+    # Identify logged-in user's role
+    raw_role = getattr(current_user.role, "value", current_user.role)
+    role = str(raw_role).strip().upper()
+
+    # Base query
     query = (
         select(Issue)
         .options(joinedload(Issue.project))
-        .where(Issue.issue_created_by == current_user.user_id)
     )
+
+    # Role-based issue filtering
+    if role in ("SUPPORT", "SUPPORTER"):
+        # Supporter sees issues raised by them
+        query = query.where(
+            Issue.issue_created_by == current_user.user_id
+        )
+
+    elif role == "DEVELOPER":
+        # Developer sees issues assigned to them
+        query = query.where(
+            Issue.assigned_to == current_user.user_id
+        )
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to view these issues",
+        )
 
     # Search by issue number or title
     if search and search.strip():
@@ -65,7 +86,9 @@ def get_my_issues(
     # Filter from date (inclusive)
     if date_from:
         start_datetime = datetime.combine(date_from, time.min)
-        query = query.where(Issue.issue_created_at >= start_datetime)
+        query = query.where(
+            Issue.issue_created_at >= start_datetime
+        )
 
     # Filter to date (inclusive)
     if date_to:
@@ -73,7 +96,9 @@ def get_my_issues(
             date_to + timedelta(days=1),
             time.min,
         )
-        query = query.where(Issue.issue_created_at < end_datetime)
+        query = query.where(
+            Issue.issue_created_at < end_datetime
+        )
 
     # Newest issues first
     query = query.order_by(Issue.issue_created_at.desc())
