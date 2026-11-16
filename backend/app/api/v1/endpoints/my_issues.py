@@ -1,6 +1,6 @@
 
 from datetime import date
-
+from math import ceil
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,8 +29,8 @@ def get_my_issue_projects(
     return db.scalars(query).all()
 
 
-# Get My Issues with filters
-@router.get("", response_model=list[MyIssueResponse])
+# Get My Issues with filters and pagination
+@router.get("")
 def read_my_issues(
     search: str | None = Query(default=None),
     project_name: str | None = Query(default=None),
@@ -39,10 +39,15 @@ def read_my_issues(
     issue_status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+
+    # Pagination
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return get_my_issues(
+    issues, total = get_my_issues(
         db=db,
         current_user=current_user,
         search=search,
@@ -52,4 +57,24 @@ def read_my_issues(
         issue_status=issue_status,
         date_from=date_from,
         date_to=date_to,
+        page=page,
+        page_size=page_size,
     )
+
+    total_pages = ceil(total / page_size) if total else 0
+
+    return {
+        "success": True,
+        "message": "Issues fetched successfully",
+        "data": {
+            "items": [MyIssueResponse.model_validate(issue) for issue in issues],
+            "pagination": {
+                "current_page": page,
+                "page_size": page_size,
+                "total_items": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_previous": page > 1 and total_pages > 0,
+            },
+        },
+    }

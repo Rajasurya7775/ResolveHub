@@ -17,6 +17,13 @@ class IssueCreate(BaseModel):
     rca: str | None = None
     issue_status: str
 
+class IssueUpdate(BaseModel):
+    issue_title: str | None = Field(default=None, min_length=1, max_length=255)
+    issue_type: str | None = None
+    issue_description: str | None = Field(default=None, min_length=1)
+    issue_priority: str | int | None = None
+    rca: str | None = None
+
 class IssueResponse(BaseModel):
     issue_id: UUID
     issue_number: str

@@ -138,6 +138,10 @@ def paginate_issues(
 # MY ISSUES
 # --------------------------------------------------
 
+# --------------------------------------------------
+# MY ISSUES - ALL ACTIVE ISSUES
+# --------------------------------------------------
+
 def get_my_issues(
     db: Session,
     user_id: int,
@@ -150,8 +154,8 @@ def get_my_issues(
     page_size: int = 10
 ) -> tuple[list[Issue], int]:
 
+    # Fetch all active issues, regardless of creator
     query = db.query(Issue).filter(
-        Issue.issue_created_by == user_id,
         Issue.deleted_at.is_(None)
     )
 
@@ -165,7 +169,6 @@ def get_my_issues(
     )
 
     return paginate_issues(query, page, page_size)
-
 
 # --------------------------------------------------
 # PREVIOUS SHIFT ISSUES

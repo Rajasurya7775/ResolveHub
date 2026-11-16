@@ -42,7 +42,11 @@ class Issue(Base):
     issue_time: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
-
+    shift_date: Mapped[date] = mapped_column(
+    Date,
+    nullable=False,
+    )
+    
     issue_title: Mapped[str] = mapped_column(
         String(255), nullable=False
     )
@@ -115,4 +119,11 @@ class Issue(Base):
         back_populates="issue",
         cascade="all, delete-orphan",
         order_by="IssueMessage.created_at",
+    )
+
+    audit_logs: Mapped[list["AuditLog"]] = relationship(
+    back_populates="issue"
+    )
+    time_logs: Mapped[list["TimeLog"]] = relationship(
+    back_populates="issue"
     )

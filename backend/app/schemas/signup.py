@@ -19,7 +19,7 @@ class UserSignup(BaseModel):
     phone_number: str
     password: str = Field(min_length=8, max_length=128)
     confirm_password: str
-    role: Literal["Supporter", "Developer"]
+    role: Literal["Support", "Developer"]
     role_type: str = Field(min_length=1, max_length=100)
 
     @field_validator("employee_id", "full_name", "role_type")
