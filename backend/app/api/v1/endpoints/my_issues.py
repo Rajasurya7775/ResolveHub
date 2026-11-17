@@ -1,6 +1,7 @@
 
 from datetime import date
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from app.services.issue_service import (
     delete_issue,
 )
 from app.api.deps import get_current_user
+from app.core.websocket_manager import manager
 
 
 router = APIRouter(
@@ -24,8 +26,12 @@ router = APIRouter(
     tags=["My Issues"],
 )
 
+logger = logging.getLogger(__name__)
 
-# Get all projects for My Issues dropdown
+
+# --------------------------------------------------
+# GET: All projects for My Issues dropdown
+# --------------------------------------------------
 @router.get("/projects", response_model=list[ProjectDropdownResponse])
 def get_my_issue_projects(
     db: Session = Depends(get_db),
@@ -35,9 +41,9 @@ def get_my_issue_projects(
     return db.scalars(query).all()
 
 
-# Get My Issues with filters and pagination
-
-# Get My Issues with filters and pagination
+# --------------------------------------------------
+# GET: My Issues with filters and pagination
+# --------------------------------------------------
 @router.get("")
 def read_my_issues(
     search: str | None = Query(default=None),
@@ -48,7 +54,6 @@ def read_my_issues(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
 
-    # Pagination
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
 
@@ -78,8 +83,9 @@ def read_my_issues(
     }
 
 
-
-# Get detailed issue when user clicks an issue
+# --------------------------------------------------
+# GET: Detailed issue
+# --------------------------------------------------
 @router.get("/{issue_id}", response_model=MyIssueResponse)
 def read_my_issue_details(
     issue_id: UUID,
@@ -89,27 +95,96 @@ def read_my_issue_details(
     return get_issue_details(db, current_user, issue_id)
 
 
-# Update issue
+# --------------------------------------------------
+# PATCH: Update issue + WebSocket broadcast
+# --------------------------------------------------
 @router.patch("/{issue_id}", response_model=MyIssueResponse)
-def edit_my_issue(
+async def edit_my_issue(
     issue_id: UUID,
     issue_data: IssueUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return update_issue(
+    update_data = issue_data.model_dump(exclude_unset=True)
+
+    if not update_data:
+        from fastapi import HTTPException, status
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields provided for update.",
+        )
+
+    # Database update and commit happen inside the service
+    updated_issue = update_issue(
         db=db,
         current_user=current_user,
         issue_id=issue_id,
-        update_data=issue_data.model_dump(exclude_unset=True),
+        update_data=update_data,
     )
 
+    # Identify the update operation
+    if "issue_status" in update_data:
+        action = "issue_status_changed"
 
-# Delete issue
+    elif "assigned_to" in update_data:
+        action = "issue_assigned"
+
+    else:
+        action = "issue_updated"
+
+    # Broadcast only after successful database commit
+    try:
+        await manager.broadcast({
+            "event": "dashboard_updated",
+            "action": action,
+            "issue_number": updated_issue.issue_number,
+        })
+
+    except Exception:
+        logger.exception(
+            "Issue updated, but dashboard broadcast failed"
+        )
+
+    return updated_issue
+
+
+# --------------------------------------------------
+# DELETE: Delete issue + WebSocket broadcast
+# --------------------------------------------------
 @router.delete("/{issue_id}")
-def remove_my_issue(
+async def remove_my_issue(
     issue_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return delete_issue(db, current_user, issue_id)
+    # Capture issue number before deletion
+    issue = get_issue_details(
+        db=db,
+        current_user=current_user,
+        issue_id=issue_id,
+    )
+
+    issue_number = issue.issue_number
+
+    # Database deletion and commit happen inside the service
+    result = delete_issue(
+        db=db,
+        current_user=current_user,
+        issue_id=issue_id,
+    )
+
+    # Broadcast only after successful deletion
+    try:
+        await manager.broadcast({
+            "event": "dashboard_updated",
+            "action": "issue_deleted",
+            "issue_number": issue_number,
+        })
+
+    except Exception:
+        logger.exception(
+            "Issue deleted, but dashboard broadcast failed"
+        )
+
+    return result

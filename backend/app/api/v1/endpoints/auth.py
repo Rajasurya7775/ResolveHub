@@ -40,19 +40,19 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             detail="Account is not active"
         )
 
-    # Expected role based on selected portal
+    # Expected role based on selected porta
     expected_roles = {
-        "support": "SUPPORTER",
+        "Support": "SUPPORT",
         "developer": "DEVELOPER"
     }
 
-    expected_role = expected_roles[payload.portal]
+    expected_role = expected_roles[payload.role]
 
     # Verify database role
     if user.role.strip().upper() != expected_role:
         raise HTTPException(
             status_code=403,
-            detail=f"You are not authorized to access the {payload.portal} portal"
+            detail=f"You are not authorized to access the {payload.role} role"
         )
 
     # Generate token

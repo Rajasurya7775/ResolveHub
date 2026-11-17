@@ -1,19 +1,25 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
-from typing import Literal
-from pydantic import BaseModel, EmailStr,field_validator
 
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from typing import Literal
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    portal: Literal["support", "developer"]
+    role: Literal["Support", "developer"]
 
-    @field_validator("portal", mode="before")
+    @field_validator("role", mode="before")
     @classmethod
-    def normalize_portal(cls, value):
+    def normalize_role(cls, value):
         if isinstance(value, str):
-            return value.strip().lower()
+            value = value.strip()
+
+            if value.lower() == "support":
+                return "Support"
+
+            if value.lower() == "developer":
+                return "developer"
+
         return value
 
 

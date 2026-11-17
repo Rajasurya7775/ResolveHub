@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
+from app.api.v1.endpoints import dashboard_ws
 
 # 1. Create FastAPI application
 app = FastAPI(
@@ -26,8 +27,10 @@ app.add_middleware(
 # 3. Register API routes
 app.include_router(api_router, prefix="/api/v1")
 
+# 4. Register WebSocket route
+app.include_router(dashboard_ws.router)
 
-# 4. Health check
+# 5. Health check
 @app.get("/health", tags=["Health"])
 def health_check():
     return {
