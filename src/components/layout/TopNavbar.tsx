@@ -8,7 +8,8 @@ interface TopNavbarProps {
   onToggleSidebar?: () => void;
 }
 
-const getShiftTiming = (shiftName: string): string => {
+const getShiftTiming = (shiftName?: string): string => {
+  if (!shiftName) return '6:15 AM – 2:15 PM';
   if (shiftName.includes('A')) return '6:15 AM – 2:15 PM';
   if (shiftName.includes('B')) return '2:15 PM – 10:15 PM';
   return '10:15 PM – 6:15 AM';

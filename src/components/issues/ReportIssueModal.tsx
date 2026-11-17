@@ -101,9 +101,12 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
       setIsLoadingProjects(true);
       setIsLoadingDevelopers(true);
 
+      const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
+      const targetRole = isDev ? 'supporter' : 'developer';
+
       const [projRes, devRes] = await Promise.all([
         apiFetchProjects(),
-        apiFetchDevelopers()
+        apiFetchDevelopers(targetRole)
       ]);
 
       if (isMounted) {

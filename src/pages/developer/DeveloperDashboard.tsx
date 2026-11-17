@@ -1,103 +1,63 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useIssues } from '../../context/IssueContext';
 import { ReportIssueModal } from '../../components/issues/ReportIssueModal';
 import { HomeInsights } from '../../components/dashboard/HomeInsights';
 import {
   apiFetchDeveloperSummary,
   DeveloperDashboardSummary
 } from '../../services/api/dashboardService';
-import { Issue } from '../../types/issue';
+import { useDashboardWebSocket } from '../../hooks/useDashboardWebSocket';
 
 export const DeveloperDashboard: React.FC = () => {
-  const { currentUser } = useAuth();
-  const { issues, previousIssues, myIssues, refreshIssues } = useIssues();
+  const { currentUser, refreshProfile } = useAuth();
 
   const [summary, setSummary] = useState<DeveloperDashboardSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState<number>(0);
 
-  // Helper to check if issue is assigned to the authenticated developer
-  const isAssignedToCurrentDev = useCallback(
-    (issue: Issue): boolean => {
-      if (!currentUser) return false;
-      const devName = (currentUser.name || '').trim().toLowerCase();
-      const devId = (currentUser.employeeId || '').trim().toLowerCase();
-
-      const accName = (issue.acceptedDeveloper || '').trim().toLowerCase();
-      const accId = (issue.acceptedDeveloperId || '').trim().toLowerCase();
-      const assName = (issue.assignedTo || '').trim().toLowerCase();
-      const assId = (issue.assignedToId || '').trim().toLowerCase();
-
-      return (
-        (devName.length > 0 && (accName === devName || assName === devName)) ||
-        (devId.length > 0 && (accId === devId || assId === devId))
-      );
-    },
-    [currentUser]
-  );
-
-  // Combined pool of all live accessible issues
-  const allAccessibleIssues = React.useMemo(() => {
-    const map = new Map<string, Issue>();
-    [...issues, ...myIssues, ...previousIssues].forEach((item) => {
-      if (item && item.id) {
-        map.set(item.id, item);
-      }
-    });
-    return Array.from(map.values());
-  }, [issues, myIssues, previousIssues]);
-
-  // Dynamic KPI aggregation from live issues if backend summary is pending
-  const assignedList = React.useMemo(() => {
-    return allAccessibleIssues.filter(isAssignedToCurrentDev);
-  }, [allAccessibleIssues, isAssignedToCurrentDev]);
-
-  const fallbackTotal = allAccessibleIssues.length;
-  const fallbackAssigned = assignedList.length;
-  const fallbackInProgress = assignedList.filter(
-    (i) => i.status === 'In progress' || i.status === 'In Progress'
-  ).length;
-  const fallbackPending = assignedList.filter(
-    (i) =>
-      i.status === 'Pending' ||
-      i.status === 'On Hold' ||
-      i.status === 'Open' ||
-      (i.status as string) === 'Hold'
-  ).length;
-
-  // 1. Fetch Developer KPI Summary from Backend API
+  // 1. Fetch Developer KPI Summary from Backend API (GET /api/v1/dashboard/summary)
   const loadSummary = useCallback(async () => {
-    if (!currentUser) return;
     setSummaryLoading(true);
     setSummaryError(null);
 
-    const res = await apiFetchDeveloperSummary(currentUser.employeeId, currentUser.name);
+    const res = await apiFetchDeveloperSummary();
     if (res.success && res.data) {
       setSummary(res.data);
     } else {
       setSummaryError(res.message || null);
     }
     setSummaryLoading(false);
-  }, [currentUser]);
+  }, []);
 
-  useEffect(() => {
+  // Real-time WebSocket integration: automatically refreshes KPIs and charts on dashboard_updated
+  const handleRealtimeDashboardUpdate = useCallback((eventPayload?: any) => {
+    console.log('[DeveloperDashboard] Real-time dashboard update received:', eventPayload);
     loadSummary();
+    setRefreshKey((prev) => prev + 1);
   }, [loadSummary]);
 
-  // Final KPI values (prioritize live backend API summary, gracefully aggregate live tickets)
-  const totalIssuesCount = summary && summary.totalIssues > 0 ? summary.totalIssues : fallbackTotal;
-  const assignedIssuesCount = summary && summary.assignedIssues > 0 ? summary.assignedIssues : fallbackAssigned;
-  const inProgressCount = summary && summary.inProgressCount > 0 ? summary.inProgressCount : fallbackInProgress;
-  const pendingCount = summary && summary.pendingCount > 0 ? summary.pendingCount : fallbackPending;
+  const { isConnected } = useDashboardWebSocket(handleRealtimeDashboardUpdate);
+
+  // Fetch initial profile & dashboard summary once on mount
+  useEffect(() => {
+    refreshProfile();
+    loadSummary();
+  }, [refreshProfile, loadSummary]);
+
+  // Final KPI values directly from backend API summary endpoint
+  const totalIssuesCount = summary != null ? summary.totalIssues : 0;
+  const assignedIssuesCount = summary != null ? summary.assignedIssues : 0;
+  const inProgressCount = summary != null ? summary.inProgressCount : 0;
+  const pendingCount = summary != null ? summary.pendingCount : 0;
 
   const handleIssueCreated = (issueId: string) => {
     setIsReportModalOpen(false);
     setSuccessToast(`Incident ticket ${issueId} created successfully!`);
     loadSummary();
-    refreshIssues();
+    setRefreshKey((prev) => prev + 1);
     setTimeout(() => setSuccessToast(null), 3500);
   };
 
@@ -153,10 +113,12 @@ export const DeveloperDashboard: React.FC = () => {
                   </span>
                 )}
                 <span
-                  className="badge bg-success-subtle text-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5"
+                  className={`badge ${isConnected ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary'} rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5`}
                   style={{ fontSize: '0.78rem' }}
+                  title={isConnected ? 'Real-time WebSocket connected' : 'Connecting to real-time updates...'}
                 >
-                  <i className="bi bi-check-circle-fill"></i> Active Session
+                  <i className={`bi ${isConnected ? 'bi-broadcast' : 'bi-arrow-repeat'}`}></i>
+                  {isConnected ? 'Real-Time Live' : 'Connecting...'}
                 </span>
               </div>
               <p className="text-secondary mb-0" style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>
@@ -316,7 +278,10 @@ export const DeveloperDashboard: React.FC = () => {
 
       {/* ================= 3. GRAPHS & ANALYTICS (EXACT MATCH WITH SUPPORTER DASHBOARD) ================= */}
       <div className="flex-grow-1 min-h-0 d-flex flex-column" style={{ minHeight: '280px' }}>
-        <HomeInsights />
+        <HomeInsights
+          role="Developer"
+          refreshTrigger={refreshKey}
+        />
       </div>
 
       {/* Create New Issue Modal Popup */}

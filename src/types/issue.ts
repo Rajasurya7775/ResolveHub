@@ -55,7 +55,11 @@ export interface DiscussionMessage {
 }
 
 export interface Issue {
-  id: string; // e.g. "ISS-1001"
+  id: string; // The primary UUID or unique identifier for API operations
+  issueId?: string; // UUID alias (e.g. 004cfd00-a551-4284-a397-6c0d77dd2b25)
+  issueNumber?: string; // Human-readable issue code (e.g. RES-1012)
+  issue_id?: string;
+  issue_number?: string;
   projectId: string;
   projectName?: string;
   title: string;
@@ -103,8 +107,11 @@ export interface FetchIssuesParams {
   page?: number;
   pageSize?: number;
   project?: string;
+  projectName?: string;
   issueType?: string;
   date?: string;
+  dateFrom?: string;
+  dateTo?: string;
   shift?: string;
   status?: string;
   search?: string;

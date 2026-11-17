@@ -44,8 +44,8 @@ interface IssueContextType {
   refreshPreviousIssues: (page?: number) => Promise<void>;
 
   addIssue: (newIssueData: AddIssueInput) => Promise<Issue>;
-  updateIssue: (id: string, updatedFields: Partial<Issue>) => void;
-  deleteIssue: (id: string) => Promise<boolean>;
+  updateIssue: (id: string, updatedFields: Partial<Issue>, source?: 'my-issues' | 'previous-issues') => Promise<void>;
+  deleteIssue: (id: string, source?: 'my-issues' | 'previous-issues') => Promise<boolean>;
   addDiscussionMessage: (issueId: string, text: string) => Promise<void>;
   getIssueById: (id: string) => Issue | undefined;
   getDiscussion: (issueId: string) => DiscussionMessage[];
@@ -67,7 +67,11 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [myIssues, setMyIssues] = useState<Issue[]>(() => {
     try {
       const saved = localStorage.getItem(MY_ISSUES_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.items)) return parsed.items;
+      return [];
     } catch {
       return [];
     }
@@ -76,7 +80,11 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [previousIssues, setPreviousIssues] = useState<Issue[]>(() => {
     try {
       const saved = localStorage.getItem(PREVIOUS_ISSUES_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.items)) return parsed.items;
+      return [];
     } catch {
       return [];
     }
@@ -121,7 +129,7 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const res = await apiFetchMyIssues({ page, pageSize: ISSUE_PAGE_SIZE });
       if (res.success && res.data) {
-        setMyIssues(res.data.items);
+        setMyIssues(Array.isArray(res.data.items) ? res.data.items : []);
         const total = res.data.pagination?.total_items ?? res.data.total;
         const curPage = res.data.pagination?.current_page ?? res.data.page;
         const size = res.data.pagination?.page_size ?? res.data.pageSize;
@@ -157,7 +165,7 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const res = await apiFetchPreviousIssues({ page, pageSize: ISSUE_PAGE_SIZE });
       if (res.success && res.data) {
-        setPreviousIssues(res.data.items);
+        setPreviousIssues(Array.isArray(res.data.items) ? res.data.items : []);
         const total = res.data.pagination?.total_items ?? res.data.total;
         const curPage = res.data.pagination?.current_page ?? res.data.page;
         const size = res.data.pagination?.page_size ?? res.data.pageSize;
@@ -187,22 +195,16 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await Promise.all([refreshMyIssues(), refreshPreviousIssues()]);
   }, [refreshMyIssues, refreshPreviousIssues]);
 
-  // ONLY fetch issues when user is logged in with active session / token!
-  // Prevents any calls to /my-issues/ or /previous-issues/ when on login/signup pages!
+  // Clear cached data on logout (Page-based lazy fetching handles actual API calls when visiting pages)
   useEffect(() => {
-    const token = localStorage.getItem('resolvehub_auth_token');
-    const isAuthPage = location?.pathname.includes('/login') || location?.pathname.includes('/signup');
-    if (!isMock && isAuthenticated && currentUser && token && !isAuthPage) {
-      refreshIssues();
-    } else if (!isAuthenticated) {
-      // Clear cached data on logout
+    if (!isAuthenticated) {
       setMyIssues([]);
       setPreviousIssues([]);
       setMyIssuesPagination(initialPagination);
       setPreviousIssuesPagination(initialPagination);
       setDiscussions({});
     }
-  }, [isMock, isAuthenticated, currentUser?.id, refreshIssues, location?.pathname]);
+  }, [isAuthenticated]);
 
   // Sync to session storage
   useEffect(() => {
@@ -285,9 +287,13 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newIssue;
   };
 
-  const updateIssue = async (id: string, updatedFields: Partial<Issue>) => {
+  const updateIssue = async (
+    id: string,
+    updatedFields: Partial<Issue>,
+    source?: 'my-issues' | 'previous-issues'
+  ) => {
     if (!isMock) {
-      await apiUpdateIssue(id, updatedFields);
+      await apiUpdateIssue(id, updatedFields, source);
     }
     setMyIssues((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
@@ -297,15 +303,16 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  const deleteIssue = async (id: string): Promise<boolean> => {
-    const target = myIssues.find((i) => i.id === id);
-    if (!target) return false;
-
+  const deleteIssue = async (
+    id: string,
+    source?: 'my-issues' | 'previous-issues'
+  ): Promise<boolean> => {
     if (!isMock) {
-      await apiDeleteIssue(id);
+      await apiDeleteIssue(id, source);
     }
 
     setMyIssues((prev) => prev.filter((i) => i.id !== id));
+    setPreviousIssues((prev) => prev.filter((i) => i.id !== id));
     return true;
   };
 
@@ -345,7 +352,10 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const getIssueById = (id: string): Issue | undefined => {
-    return myIssues.find((i) => i.id === id) || previousIssues.find((i) => i.id === id);
+    return (
+      myIssues.find((i) => i.id === id || i.issueNumber === id || i.issueId === id) ||
+      previousIssues.find((i) => i.id === id || i.issueNumber === id || i.issueId === id)
+    );
   };
 
   const getDiscussion = (issueId: string): DiscussionMessage[] => {
@@ -362,9 +372,9 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <IssueContext.Provider
       value={{
-        issues: myIssues,
-        myIssues,
-        previousIssues,
+        issues: Array.isArray(myIssues) ? myIssues : [],
+        myIssues: Array.isArray(myIssues) ? myIssues : [],
+        previousIssues: Array.isArray(previousIssues) ? previousIssues : [],
         discussions,
         isLoading,
         myIssuesPagination,

@@ -1,21 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useIssues } from '../../context/IssueContext';
 import { HomeInsights } from '../../components/dashboard/HomeInsights';
 import { ReportIssueModal } from '../../components/issues/ReportIssueModal';
 import { apiFetchDashboardSummary, DashboardSummary } from '../../services/api/dashboardService';
+import { useDashboardWebSocket } from '../../hooks/useDashboardWebSocket';
 
 export const SupportDashboard: React.FC = () => {
-  const { currentUser } = useAuth();
-  const { issues, refreshIssues } = useIssues();
+  const { currentUser, refreshProfile } = useAuth();
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState<number>(0);
 
   // Fetch live Dashboard Summary KPI metrics from backend API
-  // Endpoint: http://10.91.17.113:8000/api/v1/dashboard/summary
   const loadDashboardSummary = useCallback(async () => {
     setSummaryLoading(true);
     const res = await apiFetchDashboardSummary();
@@ -25,38 +24,33 @@ export const SupportDashboard: React.FC = () => {
     setSummaryLoading(false);
   }, []);
 
-  useEffect(() => {
+  // Real-time WebSocket integration: automatically refreshes KPIs and charts on dashboard_updated
+  const handleRealtimeDashboardUpdate = useCallback((eventPayload?: any) => {
+    console.log('[SupportDashboard] Real-time dashboard update received:', eventPayload);
     loadDashboardSummary();
+    setRefreshKey((prev) => prev + 1);
   }, [loadDashboardSummary]);
 
-  // Filter issues for currently logged-in supporter
-  const myIssues = issues.filter(
-    (i) => i.reportedById === currentUser?.employeeId || i.reportedBy === currentUser?.name
-  );
+  const { isConnected } = useDashboardWebSocket(handleRealtimeDashboardUpdate);
+
+  useEffect(() => {
+    refreshProfile();
+    loadDashboardSummary();
+  }, [refreshProfile, loadDashboardSummary]);
 
   // KPI Metrics: Loaded dynamically from backend API summary endpoint
-  const totalLogged = summary ? summary.totalLogged : myIssues.length;
-  const activeCount = summary
-    ? summary.activeCount
-    : Math.max(0, myIssues.length - myIssues.filter((i) => i.status === 'Resolved').length);
-  const resolvedCount = summary
-    ? summary.resolvedCount
-    : myIssues.filter((i) => i.status === 'Resolved').length;
-  const inProgressCount = summary
-    ? summary.inProgressCount
-    : myIssues.filter((i) => i.status === 'In Progress').length;
-  const openCount = summary
-    ? summary.openCount
-    : myIssues.filter((i) => i.status === 'Open').length;
-  const acceptedCount = summary
-    ? summary.acceptedCount
-    : myIssues.filter((i) => i.status === 'Accepted').length;
+  const totalLogged = summary ? summary.totalLogged : 0;
+  const activeCount = summary ? summary.activeCount : 0;
+  const resolvedCount = summary ? summary.resolvedCount : 0;
+  const inProgressCount = summary ? summary.inProgressCount : 0;
+  const openCount = summary ? summary.openCount : 0;
+  const acceptedCount = summary ? summary.acceptedCount : 0;
 
   const handleIssueCreated = (issueId: string) => {
     setIsReportModalOpen(false);
     setSuccessToast(`Issue ${issueId} reported successfully!`);
     loadDashboardSummary();
-    refreshIssues();
+    setRefreshKey((prev) => prev + 1);
     setTimeout(() => setSuccessToast(null), 3500);
   };
 
@@ -100,8 +94,13 @@ export const SupportDashboard: React.FC = () => {
                     <i className="bi bi-person-badge"></i> {currentUser.employeeId}
                   </span>
                 )}
-                <span className="badge bg-success-subtle text-success rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5" style={{ fontSize: '0.78rem' }}>
-                  <i className="bi bi-check-circle-fill"></i> Active Session
+                <span
+                  className={`badge ${isConnected ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary'} rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5`}
+                  style={{ fontSize: '0.78rem' }}
+                  title={isConnected ? 'Real-time WebSocket connected' : 'Connecting to real-time updates...'}
+                >
+                  <i className={`bi ${isConnected ? 'bi-broadcast' : 'bi-arrow-repeat'}`}></i>
+                  {isConnected ? 'Real-Time Live' : 'Connecting...'}
                 </span>
               </div>
               <p className="text-secondary mb-0" style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>
@@ -221,7 +220,7 @@ export const SupportDashboard: React.FC = () => {
 
       {/* ================= 3. TWO GRAPHS ONLY: LINE CHART & HISTOGRAM ================= */}
       <div className="flex-grow-1 min-h-0 d-flex flex-column" style={{ minHeight: '280px' }}>
-        <HomeInsights />
+        <HomeInsights role="Support" refreshTrigger={refreshKey} />
       </div>
 
       {/* Report Issue Modal Popup */}

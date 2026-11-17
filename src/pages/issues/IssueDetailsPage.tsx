@@ -31,27 +31,37 @@ export const IssueDetailsPage: React.FC = () => {
 
   // Determine back route from location state
   const fromState = (location.state as any)?.from;
+  const sourceState = (location.state as any)?.source;
   const isDevUser = String(currentUser?.role || '').toLowerCase().includes('dev');
+  const sourceHint: 'my-issues' | 'previous-issues' =
+    sourceState === 'previous-issues' ||
+      fromState === 'previous-issues' ||
+      fromState === '/support/previous-issues' ||
+      fromState === '/developer/all' ||
+      fromState === 'developer-all'
+      ? 'previous-issues'
+      : 'my-issues';
+
   const backLabel =
     fromState === 'previous-issues'
       ? 'Previous Issues'
       : fromState === 'developer-assigned'
-      ? 'Assigned Issues'
-      : fromState === 'developer-all'
-      ? 'All Issues'
-      : isDevUser
-      ? 'Assigned Issues'
-      : 'My Issues';
+        ? 'Assigned Issues'
+        : fromState === 'developer-all'
+          ? 'All Issues'
+          : isDevUser
+            ? 'Assigned Issues'
+            : 'My Issues';
   const backPath =
     fromState === 'previous-issues'
       ? '/support/previous-issues'
       : fromState === 'developer-assigned'
-      ? '/developer/assigned'
-      : fromState === 'developer-all'
-      ? '/developer/all'
-      : isDevUser
-      ? '/developer/assigned'
-      : '/support/my-issues';
+        ? '/developer/assigned'
+        : fromState === 'developer-all'
+          ? '/developer/all'
+          : isDevUser
+            ? '/developer/assigned'
+            : '/support/my-issues';
 
   // Load initial issue from context or location state
   const initialIssue = (location.state as any)?.issue || (id ? getIssueById(id) : undefined);
@@ -81,7 +91,7 @@ export const IssueDetailsPage: React.FC = () => {
     setIsLoading(true);
     setFetchError(null);
 
-    const res = await apiFetchIssueById(id);
+    const res = await apiFetchIssueById(id, sourceHint);
     if (res.success && res.data) {
       setIssue(res.data);
       setEditTitle(res.data.title);
@@ -137,25 +147,29 @@ export const IssueDetailsPage: React.FC = () => {
 
     setSaveError('');
     try {
-      await updateIssue(issue.id, {
-        title: editTitle.trim(),
-        projectId: editProject,
-        issueType: editType,
-        description: editDesc.trim(),
-        shortDescription: editDesc.length > 85 ? `${editDesc.substring(0, 85)}...` : editDesc,
-        occurrenceTime: editOccurrence
-      });
+      await updateIssue(
+        issue.id,
+        {
+          title: editTitle.trim(),
+          projectId: editProject,
+          issueType: editType,
+          description: editDesc.trim(),
+          shortDescription: editDesc.length > 85 ? `${editDesc.substring(0, 85)}...` : editDesc,
+          occurrenceTime: editOccurrence
+        },
+        sourceHint
+      );
 
       setIssue((prev) =>
         prev
           ? {
-              ...prev,
-              title: editTitle.trim(),
-              projectId: editProject,
-              issueType: editType,
-              description: editDesc.trim(),
-              occurrenceTime: editOccurrence
-            }
+            ...prev,
+            title: editTitle.trim(),
+            projectId: editProject,
+            issueType: editType,
+            description: editDesc.trim(),
+            occurrenceTime: editOccurrence
+          }
           : undefined
       );
 
@@ -198,8 +212,8 @@ export const IssueDetailsPage: React.FC = () => {
 
   const handleDelete = () => {
     if (!issue) return;
-    if (window.confirm(`Are you sure you want to delete ${issue.id}: "${issue.title}"?`)) {
-      deleteIssue(issue.id);
+    if (window.confirm(`Are you sure you want to delete ${issue.issueNumber || issue.id}: "${issue.title}"?`)) {
+      deleteIssue(issue.id, sourceHint);
       navigate(backPath);
     }
   };
@@ -210,7 +224,7 @@ export const IssueDetailsPage: React.FC = () => {
         <div className="spinner-border text-primary mb-3" role="status">
           <span className="visually-hidden">Loading issue details...</span>
         </div>
-        <h6 className="fw-bold text-navy mb-1">Loading Issue #{id}...</h6>
+        <h6 className="fw-bold text-navy mb-1">Loading Issue...</h6>
         <p className="text-secondary small mb-0">Fetching live issue data from backend API</p>
       </div>
     );
@@ -227,7 +241,7 @@ export const IssueDetailsPage: React.FC = () => {
         </div>
         <h5 className="fw-bold text-navy mb-2">Issue Not Found</h5>
         <p className="text-secondary small mb-4" style={{ maxWidth: '420px' }}>
-          {fetchError || `We couldn't locate incident ticket ${id} in your active records.`}
+          {fetchError || `We couldn't locate incident ticket in your active records.`}
         </p>
         <button type="button" className="btn btn-primary rounded-pill px-4" onClick={handleBack}>
           <i className="bi bi-arrow-left me-1.5"></i>Return to {backLabel}
@@ -240,11 +254,11 @@ export const IssueDetailsPage: React.FC = () => {
 
   return (
     <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '0.75rem' }}>
-      
+
       {/* ================= 1. TOP HEADER & BREADCRUMB COMMAND BAR ================= */}
       <div className="bg-white rounded-3 border border-light-subtle shadow-sm px-3 py-2 flex-shrink-0">
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2.5">
-          
+
           {/* Left: Back button + Ticket Identity + Status + Priority */}
           <div className="d-flex flex-wrap align-items-center gap-2">
             <button
@@ -259,20 +273,19 @@ export const IssueDetailsPage: React.FC = () => {
             <div className="vr text-muted d-none d-sm-block" style={{ height: '18px', opacity: 0.35 }}></div>
 
             <span className="badge bg-primary fs-6 px-3 py-1 rounded-pill fw-bold">
-              {issue.id}
+              {issue.issueNumber || issue.id}
             </span>
 
             <StatusBadge status={issue.status} size="md" />
 
             {issue.priority && (
               <span
-                className={`badge rounded-pill px-2.5 py-1 fw-semibold small ${
-                  issue.priority.includes('P0')
-                    ? 'bg-danger text-white'
-                    : issue.priority.includes('P1')
+                className={`badge rounded-pill px-2.5 py-1 fw-semibold small ${issue.priority.includes('P0')
+                  ? 'bg-danger text-white'
+                  : issue.priority.includes('P1')
                     ? 'bg-warning text-dark'
                     : 'bg-primary-subtle text-primary border border-primary-subtle'
-                }`}
+                  }`}
                 style={{ fontSize: '0.76rem' }}
               >
                 <i className="bi bi-flag-fill me-1"></i>
@@ -352,13 +365,13 @@ export const IssueDetailsPage: React.FC = () => {
       {/* ================= 2. MAIN FULL-SCREEN CONTENT AREA: TWO COLUMN LAYOUT ================= */}
       <div className="flex-grow-1 min-h-0 overflow-y-auto overflow-lg-hidden">
         <div className="row g-2.5 h-100 min-h-0 details-split-container">
-          
+
           {/* ================= LEFT COLUMN (60%): ISSUE OVERVIEW & DETAILS ================= */}
           <div className="col-12 col-lg-7 d-flex flex-column details-column h-100 min-h-0">
             <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
-              
+
               <div className="p-3.5 p-xl-4 overflow-y-auto flex-grow-1">
-                
+
                 {isEditing ? (
                   /* ================= INLINE EDIT MODE ================= */
                   <form onSubmit={handleSaveEdit}>
@@ -456,7 +469,7 @@ export const IssueDetailsPage: React.FC = () => {
                 ) : (
                   /* ================= READ-ONLY DETAILS VIEW ================= */
                   <div>
-                    
+
                     {/* Title & Reporter Header */}
                     <div className="mb-3 pb-3 border-bottom">
                       <h4 className="fw-bold text-navy mb-2 lh-sm" style={{ fontSize: '1.45rem', letterSpacing: '-0.3px' }}>
@@ -491,8 +504,18 @@ export const IssueDetailsPage: React.FC = () => {
                       <div className="col-6 col-sm-3">
                         <div className="p-2.5 rounded-3 bg-light border">
                           <span className="text-muted d-block small mb-0.5" style={{ fontSize: '0.7rem' }}>PROJECT</span>
-                          <strong className="text-navy small d-block text-truncate" title={issue.projectId}>
-                            {issue.projectId}
+                          <strong
+                            className="text-navy small d-block text-truncate"
+                            title={typeof issue.projectName === 'string' ? issue.projectName : (typeof issue.projectId === 'string' ? issue.projectId : 'Project')}
+                          >
+                            {typeof issue.projectName === 'string' && issue.projectName
+                              ? issue.projectName
+                              : typeof issue.projectId === 'string'
+                                ? issue.projectId
+                                : ((issue.projectName as any)?.project_name ||
+                                  (issue.projectId as any)?.project_name ||
+                                  (issue.projectName as any)?.name ||
+                                  'Nokia Production Dashboard')}
                           </strong>
                         </div>
                       </div>
@@ -543,7 +566,7 @@ export const IssueDetailsPage: React.FC = () => {
                         <i className="bi bi-shield-check text-success"></i>
                         ROOT CAUSE ANALYSIS (RCA) & DIAGNOSTICS
                       </h6>
-                      
+
                       {issue.rca ? (
                         <div className="card border-success border-opacity-50 rounded-3 p-3 bg-success bg-opacity-10">
                           <div className="d-flex align-items-center justify-content-between mb-1.5">
@@ -578,7 +601,7 @@ export const IssueDetailsPage: React.FC = () => {
                           Engineering Queue
                         </span>
                       </div>
-                      
+
                       <div className="row g-2 align-items-center">
                         <div className="col-12 col-sm-6">
                           <span className="text-muted small d-block mb-1" style={{ fontSize: '0.72rem' }}>ASSIGNED DEVELOPER</span>
@@ -626,7 +649,7 @@ export const IssueDetailsPage: React.FC = () => {
           {/* ================= RIGHT COLUMN (40%): LIVE DISCUSSION THREAD ================= */}
           <div className="col-12 col-lg-5 d-flex flex-column details-column h-100 min-h-0">
             <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
-              
+
               {/* Thread Header */}
               <div className="p-3 border-bottom d-flex align-items-center justify-content-between bg-light flex-shrink-0">
                 <div className="d-flex align-items-center gap-2">
@@ -680,9 +703,8 @@ export const IssueDetailsPage: React.FC = () => {
                             {msg.senderName}
                           </span>
                           <span
-                            className={`badge px-1.5 py-0 rounded-pill ${
-                              isDev ? 'bg-purple-subtle text-purple' : 'bg-primary-subtle text-primary'
-                            }`}
+                            className={`badge px-1.5 py-0 rounded-pill ${isDev ? 'bg-purple-subtle text-purple' : 'bg-primary-subtle text-primary'
+                              }`}
                             style={{ fontSize: '0.65rem' }}
                           >
                             {msg.senderRole}

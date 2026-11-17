@@ -21,7 +21,6 @@ const ISSUE_STATUS_OPTIONS = [
   'In progress',
   'Pending',
   'On Hold',
-  'Escalated',
   'Resolved'
 ];
 
@@ -100,9 +99,12 @@ export const IssueFormPage: React.FC = () => {
       setIsLoadingProjects(true);
       setIsLoadingDevelopers(true);
 
+      const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
+      const targetRole = isDev ? 'supporter' : 'developer';
+
       const [projRes, devRes] = await Promise.all([
         apiFetchProjects(),
-        apiFetchDevelopers()
+        apiFetchDevelopers(targetRole)
       ]);
 
       if (isMounted) {

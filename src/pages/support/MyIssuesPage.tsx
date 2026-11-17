@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useIssues } from '../../context/IssueContext';
 import { useAuth } from '../../context/AuthContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { Pagination } from '../../components/common/Pagination';
@@ -13,7 +12,6 @@ import {
 
 export const MyIssuesPage: React.FC = () => {
   const navigate = useNavigate();
-  const { deleteIssue } = useIssues();
   const { currentUser } = useAuth();
 
   // Pagination state (default: 10 issues per page)
@@ -51,7 +49,10 @@ export const MyIssuesPage: React.FC = () => {
     let isMounted = true;
     apiFetchMyIssuesProjects().then((res) => {
       if (isMounted && res.success && res.data.length > 0) {
-        setProjectOptions(res.data);
+        const sanitized = res.data
+          .map((p: any) => (typeof p === 'string' ? p : p?.project_name || p?.name || String(p?.id || '')))
+          .filter(Boolean);
+        setProjectOptions(sanitized);
       }
     });
     return () => {
@@ -131,24 +132,13 @@ export const MyIssuesPage: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const handleDelete = async (issue: Issue) => {
-    if (window.confirm(`Are you sure you want to delete ${issue.id}: "${issue.title}"?`)) {
-      const ok = await deleteIssue(issue.id);
-      if (ok) {
-        fetchPageData(currentPage);
-      } else {
-        alert('This issue cannot be deleted because it is no longer in Open status.');
-      }
-    }
-  };
-
   return (
     <div className="d-flex flex-column h-100 overflow-hidden">
-      
+
       {/* ================= 6 SPECIFIED FILTERS BAR ================= */}
       <div className="bg-white rounded-3 border border-light-subtle shadow-sm p-2.5 mb-2.5 flex-shrink-0">
         <div className="row g-2.5 align-items-end">
-          
+
           {/* Filter 1: Issue ID / Title */}
           <div className="col-12 col-sm-6 col-lg-3">
             <label className="filter-label-sm">
@@ -181,11 +171,14 @@ export const MyIssuesPage: React.FC = () => {
             >
               <option value="All">All Projects</option>
               {projectOptions.length > 0 ? (
-                projectOptions.map((proj) => (
-                  <option key={proj} value={proj}>
-                    {proj}
-                  </option>
-                ))
+                projectOptions.map((proj) => {
+                  const projName = typeof proj === 'string' ? proj : ((proj as any)?.project_name || (proj as any)?.name || String(proj));
+                  return (
+                    <option key={projName} value={projName}>
+                      {projName}
+                    </option>
+                  );
+                })
               ) : (
                 <>
                   <option value="Nokia Production Dashboard">Nokia Production</option>
@@ -298,7 +291,7 @@ export const MyIssuesPage: React.FC = () => {
 
       {/* ================= MAIN MY ISSUES TABLE ================= */}
       <div className="fixed-table-card flex-grow-1 min-h-0">
-        
+
         {/* Sub-header info bar */}
         <div className="px-3 py-1.5 border-bottom bg-light d-flex align-items-center justify-content-between flex-shrink-0">
           <div className="d-flex align-items-center gap-2">
@@ -345,28 +338,26 @@ export const MyIssuesPage: React.FC = () => {
             <thead className="table-light sticky-top" style={{ zIndex: 1 }}>
               <tr className="small text-muted text-uppercase" style={{ fontSize: '0.72rem', letterSpacing: '0.4px' }}>
                 <th style={{ minWidth: '95px', width: '95px' }}>Issue ID</th>
-                <th style={{ minWidth: '150px' }}>Project</th>
-                <th style={{ minWidth: '170px' }}>Issue Title</th>
-                <th style={{ minWidth: '220px', maxWidth: '300px' }}>Short Description</th>
-                <th style={{ minWidth: '105px' }}>Type</th>
-                <th style={{ minWidth: '90px' }}>Shift</th>
-                <th style={{ minWidth: '110px' }}>Reported Date</th>
-                <th style={{ minWidth: '140px' }}>Developer</th>
-                <th style={{ minWidth: '115px' }}>Status</th>
-                <th className="text-end" style={{ minWidth: '95px', width: '95px' }}>Actions</th>
+                <th style={{ minWidth: '160px' }}>Project</th>
+                <th style={{ minWidth: '220px' }}>Issue Title</th>
+                <th style={{ minWidth: '110px' }}>Issue Type</th>
+                <th style={{ minWidth: '110px' }}>Status</th>
+                <th style={{ minWidth: '140px' }}>Resolved By</th>
+                <th style={{ minWidth: '115px' }}>Created Date</th>
+                <th style={{ minWidth: '95px' }}>Shift</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-5 text-muted">
+                  <td colSpan={8} className="text-center py-5 text-muted">
                     <div className="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
                     Loading my issues...
                   </td>
                 </tr>
               ) : issues.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-5 text-muted">
+                  <td colSpan={8} className="text-center py-5 text-muted">
                     <i className="bi bi-inbox fs-2 d-block mb-1 text-secondary opacity-50"></i>
                     No issues found matching your selected filters.
                   </td>
@@ -376,60 +367,52 @@ export const MyIssuesPage: React.FC = () => {
                   <tr
                     key={issue.id}
                     style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/issues/${issue.id}`, { state: { from: 'my-issues', issue } })}
+                    onClick={() => navigate(`/issues/${issue.issueId || issue.id}`, { state: { from: '/support/my-issues', source: 'my-issues', issue } })}
+                    title="Click row to view issue details"
                   >
-                    <td className="fw-bold text-primary small">{issue.id}</td>
-                    <td className="small text-navy fw-medium">{issue.projectId}</td>
-                    <td className="fw-semibold text-navy small">{issue.title}</td>
-                    <td className="small text-muted text-truncate" style={{ maxWidth: '240px' }}>
-                      {issue.shortDescription}
+                    <td className="fw-bold text-primary small">{issue.issueNumber || issue.id}</td>
+                    <td className="small text-navy fw-medium">
+                      {typeof issue.projectName === 'string' && issue.projectName
+                        ? issue.projectName
+                        : typeof issue.projectId === 'string' && issue.projectId
+                          ? issue.projectId
+                          : ((issue.projectName as any)?.project_name ||
+                            (issue.projectId as any)?.project_name ||
+                            (issue.projectName as any)?.name ||
+                            'Nokia Production Dashboard')}
                     </td>
+                    <td className="fw-semibold text-navy small">{issue.title}</td>
                     <td>
                       <span className="badge bg-light text-secondary border small" style={{ fontSize: '0.7rem' }}>
                         {issue.issueType}
                       </span>
                     </td>
                     <td>
-                      <span className="badge bg-light text-navy border small" style={{ fontSize: '0.7rem' }}>
-                        <i className="bi bi-clock me-1 text-primary"></i>
-                        {issue.shift || 'Shift A'}
-                      </span>
-                    </td>
-                    <td className="small text-muted" style={{ fontSize: '0.78rem' }}>{issue.reportedDate}</td>
-                    <td className="small">
-                      {issue.acceptedDeveloper === 'Unassigned' ? (
-                        <span className="text-muted fst-italic">Unassigned</span>
-                      ) : (
-                        <span className="fw-semibold text-navy">
-                          <i className="bi bi-person-check text-primary me-1"></i>
-                          {issue.acceptedDeveloper}
-                        </span>
-                      )}
-                    </td>
-                    <td>
                       <StatusBadge status={issue.status} size="sm" />
                     </td>
-                    <td className="text-end" onClick={(e) => e.stopPropagation()}>
-                      <div className="btn-group btn-group-sm">
-                        <button
-                          type="button"
-                          className="btn btn-light border text-primary py-0.5 px-2"
-                          title="View Details & Chat"
-                          onClick={() => navigate(`/issues/${issue.id}`, { state: { from: 'my-issues', issue } })}
-                        >
-                          <i className="bi bi-box-arrow-up-right me-1"></i>Details
-                        </button>
-                        {issue.isEligibleForDelete && issue.status === 'Open' && (
-                          <button
-                            type="button"
-                            className="btn btn-light border text-danger py-0.5 px-2"
-                            title="Delete Issue"
-                            onClick={() => handleDelete(issue)}
-                          >
-                            <i className="bi bi-trash"></i>
-                          </button>
-                        )}
-                      </div>
+                    <td className="small">
+                      {issue.acceptedDeveloper && issue.acceptedDeveloper !== 'Unassigned' ? (
+                        <span className="fw-semibold text-navy d-inline-flex align-items-center gap-1.5">
+                          <i className="bi bi-person-check text-primary"></i>
+                          {issue.acceptedDeveloper}
+                        </span>
+                      ) : issue.assignedTo && issue.assignedTo !== 'Unassigned' ? (
+                        <span className="fw-semibold text-navy d-inline-flex align-items-center gap-1.5">
+                          <i className="bi bi-person-check text-primary"></i>
+                          {issue.assignedTo}
+                        </span>
+                      ) : (
+                        <span className="text-muted fst-italic">Unassigned</span>
+                      )}
+                    </td>
+                    <td className="small text-muted" style={{ fontSize: '0.78rem' }}>
+                      {issue.reportedDate || '-'}
+                    </td>
+                    <td>
+                      <span className="badge bg-light text-navy border small" style={{ fontSize: '0.7rem' }}>
+                        <i className="bi bi-clock me-1 text-primary"></i>
+                        {issue.shift || 'Shift-A'}
+                      </span>
                     </td>
                   </tr>
                 ))

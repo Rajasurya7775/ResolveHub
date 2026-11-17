@@ -317,11 +317,56 @@ export async function apiSignup(formData: SignupFormData): Promise<AuthResponse>
     localStorage.setItem('resolvehub_auth_token', token);
   }
 
-  const user = normalizeUser(rawUser);
+  const fallbackRole: UserRole =
+    formData.role === 'Support' || formData.role === 'Supporter' ? 'Support' : 'Developer';
+  const user = normalizeUser(rawUser, fallbackRole);
 
   return {
     success: true,
     user,
     token
+  };
+}
+
+/**
+ * Fetch authenticated user profile details from:
+ * GET /api/v1/auth/me
+ */
+export async function apiGetProfile(): Promise<{ success: boolean; user?: User; message?: string }> {
+  const token = localStorage.getItem('resolvehub_auth_token');
+  if (!token) {
+    return { success: false, message: 'No authentication token found.' };
+  }
+
+  const reqOptions: RequestInit = {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`
+    }
+  };
+
+  let response = await fetchWithTimeout(`${API_BASE_URL}/auth/me`, reqOptions);
+
+  if (!response || response.status === 404) {
+    response = await fetchWithTimeout(`${API_BASE_URL}/auth/me/`, reqOptions);
+  }
+
+  if (!response) {
+    return { success: false, message: 'Failed to connect to /auth/me endpoint.' };
+  }
+
+  if (!response.ok) {
+    return { success: false, message: `Profile endpoint returned error ${response.status}` };
+  }
+
+  const data = await response.json().catch(() => null);
+  const rawUser = data?.user || data?.data || data;
+  const user = normalizeUser(rawUser);
+
+  return {
+    success: true,
+    user
   };
 }

@@ -1,26 +1,58 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useIssues } from '../../context/IssueContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { Pagination } from '../../components/common/Pagination';
 import { Issue } from '../../types/issue';
 import { exportIssuesToCsv } from '../../utils/exportUtils';
-import { apiFetchPreviousIssuesProjects } from '../../services/api/issueService';
+import {
+  apiFetchMyIssues,
+  apiFetchMyIssuesProjects
+} from '../../services/api/issueService';
 
 export const DeveloperAssignedIssuesPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { issues, previousIssues, myIssues, isLoading, refreshIssues } = useIssues();
 
-  // Dynamic projects
+  // Pagination state (default: 10 issues per page)
+  const PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalIssues, setTotalIssues] = useState<number>(0);
+  const [hasNext, setHasNext] = useState<boolean>(false);
+  const [hasPrevious, setHasPrevious] = useState<boolean>(false);
+  const [issues, setIssues] = useState<Issue[]>([]);
+
+  // Loading & Error states
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  // Dynamic projects fetched from /api/v1/issues/projects (cached)
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
 
+  // The 6 Filters:
+  // 1. Issue ID / Title
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  // 2. Project
+  const [projectFilter, setProjectFilter] = useState<string>('All');
+  // 3. Issue Type
+  const [typeFilter, setTypeFilter] = useState<string>('All');
+  // 4. Date
+  const [dateFilter, setDateFilter] = useState<string>('');
+  // 5. Shift
+  const [shiftFilter, setShiftFilter] = useState<string>('All');
+  // 6. Status
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+
+  // Load project names once on mount (cached)
   useEffect(() => {
     let isMounted = true;
-    apiFetchPreviousIssuesProjects().then((res) => {
+    apiFetchMyIssuesProjects().then((res) => {
       if (isMounted && res.success && res.data.length > 0) {
-        setProjectOptions(res.data);
+        const sanitized = res.data
+          .map((p: any) => (typeof p === 'string' ? p : p?.project_name || p?.name || String(p?.id || '')))
+          .filter(Boolean);
+        setProjectOptions(sanitized);
       }
     });
     return () => {
@@ -28,86 +60,55 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
     };
   }, []);
 
-  // Always refresh on mount
-  useEffect(() => {
-    refreshIssues();
-  }, [refreshIssues]);
+  // Fetch paginated data from backend API
+  const fetchPageData = useCallback(
+    async (pageToLoad: number) => {
+      setIsLoading(true);
+      setApiError(null);
 
-  // The 6 Filters:
-  // 1. Issue ID / Title
-  const [searchTerm, setSearchTerm] = useState('');
-  // 2. Project
-  const [projectFilter, setProjectFilter] = useState<string>('All');
-  // 3. Issue Type
-  const [typeFilter, setTypeFilter] = useState<string>('All');
-  // 4. Date
-  const [dateFilter, setDateFilter] = useState('');
-  // 5. Shift
-  const [shiftFilter, setShiftFilter] = useState<string>('All');
-  // 6. Status
-  const [statusFilter, setStatusFilter] = useState<string>('All');
+      const res = await apiFetchMyIssues({
+        page: pageToLoad,
+        pageSize: PAGE_SIZE,
+        project: projectFilter !== 'All' ? projectFilter : undefined,
+        issueType: typeFilter !== 'All' ? typeFilter : undefined,
+        date: dateFilter || undefined,
+        shift: shiftFilter !== 'All' ? shiftFilter : undefined,
+        status: statusFilter !== 'All' ? statusFilter : undefined,
+        search: searchTerm.trim() || undefined
+      });
 
-  // Pagination (10 per page)
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+      setIsLoading(false);
 
-  // Filter issues assigned to the logged-in developer
-  const isAssigned = useCallback(
-    (issue: Issue): boolean => {
-      if (!currentUser) return false;
-      const devName = (currentUser.name || '').trim().toLowerCase();
-      const devId = (currentUser.employeeId || '').trim().toLowerCase();
+      if (res.success && res.data) {
+        const { items, pagination } = res.data;
+        const total = pagination?.total_items ?? res.data.total ?? items.length;
+        const pages = pagination?.total_pages ?? res.data.totalPages ?? 1;
+        const cur = pagination?.current_page ?? res.data.page ?? pageToLoad;
+        const next = pagination?.has_next ?? res.data.hasNext ?? false;
+        const prev = pagination?.has_previous ?? res.data.hasPrevious ?? false;
 
-      const accName = (issue.acceptedDeveloper || '').trim().toLowerCase();
-      const accId = (issue.acceptedDeveloperId || '').trim().toLowerCase();
-      const assName = (issue.assignedTo || '').trim().toLowerCase();
-      const assId = (issue.assignedToId || '').trim().toLowerCase();
-
-      return (
-        (devName.length > 0 && (accName === devName || assName === devName)) ||
-        (devId.length > 0 && (accId === devId || assId === devId))
-      );
-    },
-    [currentUser]
-  );
-
-  const assignedIssues = useMemo(() => {
-    const map = new Map<string, Issue>();
-    [...issues, ...myIssues, ...previousIssues].forEach((item) => {
-      if (item && item.id && isAssigned(item)) {
-        map.set(item.id, item);
+        setIssues(items);
+        setTotalIssues(total);
+        setTotalPages(pages);
+        setCurrentPage(cur);
+        setHasNext(next);
+        setHasPrevious(prev);
+      } else {
+        setIssues([]);
+        setTotalIssues(0);
+        setTotalPages(1);
+        setHasNext(false);
+        setHasPrevious(false);
+        setApiError(res.message || 'Failed to fetch Assigned Issues from backend API.');
       }
-    });
-    return Array.from(map.values());
-  }, [issues, myIssues, previousIssues, isAssigned]);
-
-  // Combined Filters Logic
-  const filteredIssues = useMemo(() => {
-    return assignedIssues.filter((issue) => {
-      const searchLower = searchTerm.toLowerCase();
-      const matchSearch =
-        !searchTerm ||
-        issue.id.toLowerCase().includes(searchLower) ||
-        issue.title.toLowerCase().includes(searchLower);
-
-      const matchProject = projectFilter === 'All' || issue.projectId === projectFilter;
-      const matchType = typeFilter === 'All' || issue.issueType === typeFilter;
-      const matchDate =
-        !dateFilter ||
-        issue.reportedDate === dateFilter ||
-        issue.occurrenceTime.includes(dateFilter);
-      const matchShift = shiftFilter === 'All' || issue.shift === shiftFilter;
-      const matchStatus = statusFilter === 'All' || issue.status === statusFilter;
-
-      return matchSearch && matchProject && matchType && matchDate && matchShift && matchStatus;
-    });
-  }, [assignedIssues, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter]);
-
-  const totalPages = Math.ceil(filteredIssues.length / itemsPerPage) || 1;
-  const paginatedIssues = filteredIssues.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    },
+    [projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter, searchTerm]
   );
+
+  // Trigger API fetch on filter change or page change
+  useEffect(() => {
+    fetchPageData(currentPage);
+  }, [fetchPageData, currentPage]);
 
   const handleClearFilters = () => {
     setSearchTerm('');
@@ -119,13 +120,17 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+  };
+
   return (
     <div className="d-flex flex-column h-100 min-h-0">
-      
+
       {/* ================= 6 SPECIFIED FILTERS BAR ================= */}
       <div className="bg-white rounded-3 border border-light-subtle shadow-sm p-2.5 mb-2.5 flex-shrink-0">
         <div className="row g-2.5 align-items-end">
-          
+
           {/* Filter 1: Issue ID / Title */}
           <div className="col-12 col-sm-6 col-lg-3">
             <label className="filter-label-sm">
@@ -164,11 +169,14 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
             >
               <option value="All">All Projects</option>
               {projectOptions.length > 0 ? (
-                projectOptions.map((proj) => (
-                  <option key={proj} value={proj}>
-                    {proj}
-                  </option>
-                ))
+                projectOptions.map((proj) => {
+                  const projName = typeof proj === 'string' ? proj : ((proj as any)?.project_name || (proj as any)?.name || String(proj));
+                  return (
+                    <option key={projName} value={projName}>
+                      {projName}
+                    </option>
+                  );
+                })
               ) : (
                 <>
                   <option value="Nokia Production Dashboard">Nokia Production</option>
@@ -278,9 +286,22 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Backend API Error Banner */}
+      {apiError && (
+        <div className="alert alert-warning py-1.5 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-2 flex-shrink-0">
+          <div className="d-flex align-items-center gap-2">
+            <i className="bi bi-exclamation-triangle-fill text-warning fs-6"></i>
+            <span>{apiError}</span>
+          </div>
+          <button className="btn btn-sm btn-outline-dark py-0 px-2" onClick={() => fetchPageData(currentPage)}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* ================= MAIN ASSIGNED ISSUES TABLE ================= */}
       <div className="fixed-table-card flex-grow-1 min-h-0">
-        
+
         {/* Sub-header info bar */}
         <div className="px-3 py-1.5 border-bottom bg-light d-flex align-items-center justify-content-between flex-shrink-0">
           <div className="d-flex align-items-center gap-2">
@@ -288,19 +309,21 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
               Issues Assigned to Me
             </span>
             <span className="badge bg-primary text-white rounded-pill" style={{ fontSize: '0.68rem' }}>
-              {filteredIssues.length} of {assignedIssues.length} assigned
+              {totalIssues} total assigned
             </span>
           </div>
 
           <div className="d-flex align-items-center gap-2">
-            <span className="small text-muted d-none d-md-inline" style={{ fontSize: '0.72rem' }}>
-              Logged in: <strong className="text-navy">{currentUser?.name}</strong> ({currentUser?.employeeId})
-            </span>
+            {currentUser && (
+              <span className="small text-muted d-none d-md-inline" style={{ fontSize: '0.72rem' }}>
+                Logged in: <strong className="text-navy">{currentUser.name}</strong> ({currentUser.employeeId})
+              </span>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-outline-secondary py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
               style={{ fontSize: '0.74rem' }}
-              onClick={() => refreshIssues()}
+              onClick={() => fetchPageData(currentPage)}
               disabled={isLoading}
               title="Refresh assigned issues"
             >
@@ -311,9 +334,9 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
               type="button"
               className="btn btn-sm btn-outline-success py-0.5 px-2 rounded-2 d-inline-flex align-items-center gap-1"
               style={{ fontSize: '0.74rem' }}
-              onClick={() => exportIssuesToCsv(filteredIssues, `assigned_issues_${currentUser?.employeeId || 'dev'}.csv`)}
+              onClick={() => exportIssuesToCsv(issues, `assigned_issues_${currentUser?.employeeId || 'dev'}.csv`)}
               title="Export assigned issues to CSV"
-              disabled={filteredIssues.length === 0}
+              disabled={issues.length === 0}
             >
               <i className="bi bi-file-earmark-spreadsheet"></i>
               Export CSV
@@ -327,75 +350,81 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
             <thead className="table-light sticky-top" style={{ zIndex: 1 }}>
               <tr className="small text-muted text-uppercase" style={{ fontSize: '0.72rem', letterSpacing: '0.4px' }}>
                 <th style={{ minWidth: '95px', width: '95px' }}>Issue ID</th>
-                <th style={{ minWidth: '150px' }}>Project</th>
-                <th style={{ minWidth: '170px' }}>Issue Title</th>
-                <th style={{ minWidth: '220px', maxWidth: '300px' }}>Short Description</th>
-                <th style={{ minWidth: '105px' }}>Type</th>
-                <th style={{ minWidth: '90px' }}>Shift</th>
-                <th style={{ minWidth: '110px' }}>Reported Date</th>
-                <th style={{ minWidth: '140px' }}>Assigned To</th>
-                <th style={{ minWidth: '115px' }}>Status</th>
-                <th className="text-end" style={{ minWidth: '95px', width: '95px' }}>Actions</th>
+                <th style={{ minWidth: '160px' }}>Project</th>
+                <th style={{ minWidth: '220px' }}>Issue Title</th>
+                <th style={{ minWidth: '110px' }}>Issue Type</th>
+                <th style={{ minWidth: '110px' }}>Status</th>
+                <th style={{ minWidth: '140px' }}>Resolved By</th>
+                <th style={{ minWidth: '115px' }}>Created Date</th>
+                <th style={{ minWidth: '95px' }}>Shift</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-5 text-muted">
+                  <td colSpan={8} className="text-center py-5 text-muted">
                     <div className="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
                     Loading assigned issues...
                   </td>
                 </tr>
-              ) : paginatedIssues.length === 0 ? (
+              ) : issues.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-5 text-muted">
+                  <td colSpan={8} className="text-center py-5 text-muted">
                     <i className="bi bi-inbox fs-2 d-block mb-1 text-secondary opacity-50"></i>
                     No assigned issues found matching your selected filters.
                   </td>
                 </tr>
               ) : (
-                paginatedIssues.map((issue) => (
+                issues.map((issue) => (
                   <tr
                     key={issue.id}
                     style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/issues/${issue.id}`, { state: { from: 'developer-assigned', issue } })}
+                    onClick={() => navigate(`/issues/${issue.issueId || issue.id}`, { state: { from: '/developer/assigned', source: 'my-issues', issue } })}
+                    title="Click row to view issue details"
                   >
-                    <td className="fw-bold text-primary small">{issue.id}</td>
-                    <td className="small text-navy fw-medium">{issue.projectName || issue.projectId}</td>
-                    <td className="fw-semibold text-navy small">{issue.title}</td>
-                    <td className="small text-muted text-truncate" style={{ maxWidth: '240px' }}>
-                      {issue.shortDescription}
+                    <td className="fw-bold text-primary small">{issue.issueNumber || issue.id}</td>
+                    <td className="small text-navy fw-medium">
+                      {typeof issue.projectName === 'string' && issue.projectName
+                        ? issue.projectName
+                        : typeof issue.projectId === 'string' && issue.projectId
+                          ? issue.projectId
+                          : ((issue.projectName as any)?.project_name ||
+                            (issue.projectId as any)?.project_name ||
+                            (issue.projectName as any)?.name ||
+                            'Nokia Production Dashboard')}
                     </td>
+                    <td className="fw-semibold text-navy small">{issue.title}</td>
                     <td>
                       <span className="badge bg-light text-secondary border small" style={{ fontSize: '0.7rem' }}>
                         {issue.issueType}
                       </span>
                     </td>
                     <td>
+                      <StatusBadge status={issue.status} size="sm" />
+                    </td>
+                    <td className="small">
+                      {issue.acceptedDeveloper && issue.acceptedDeveloper !== 'Unassigned' ? (
+                        <span className="fw-semibold text-navy d-inline-flex align-items-center gap-1.5">
+                          <i className="bi bi-person-check text-primary"></i>
+                          {issue.acceptedDeveloper}
+                        </span>
+                      ) : issue.assignedTo && issue.assignedTo !== 'Unassigned' ? (
+                        <span className="fw-semibold text-navy d-inline-flex align-items-center gap-1.5">
+                          <i className="bi bi-person-check text-primary"></i>
+                          {issue.assignedTo}
+                        </span>
+                      ) : (
+                        <span className="text-muted fst-italic">Unassigned</span>
+                      )}
+                    </td>
+                    <td className="small text-muted" style={{ fontSize: '0.78rem' }}>
+                      {issue.reportedDate || '-'}
+                    </td>
+                    <td>
                       <span className="badge bg-light text-navy border small" style={{ fontSize: '0.7rem' }}>
                         <i className="bi bi-clock me-1 text-primary"></i>
                         {issue.shift || 'Shift-A'}
                       </span>
-                    </td>
-                    <td className="small text-muted" style={{ fontSize: '0.78rem' }}>{issue.reportedDate}</td>
-                    <td className="small">
-                      <span className="fw-semibold text-navy">
-                        <i className="bi bi-person-check text-primary me-1"></i>
-                        {issue.acceptedDeveloper}
-                      </span>
-                    </td>
-                    <td>
-                      <StatusBadge status={issue.status} size="sm" />
-                    </td>
-                    <td className="text-end" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-light border text-primary py-0.5 px-2 rounded-2"
-                        title="View Details & Chat"
-                        onClick={() => navigate(`/issues/${issue.id}`, { state: { from: 'developer-assigned', issue } })}
-                      >
-                        <i className="bi bi-box-arrow-up-right me-1"></i>Details
-                      </button>
                     </td>
                   </tr>
                 ))
@@ -408,11 +437,11 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
-          totalItems={filteredIssues.length}
-          pageSize={itemsPerPage}
-          hasNext={currentPage < totalPages}
-          hasPrevious={currentPage > 1}
-          onPageChange={setCurrentPage}
+          totalItems={totalIssues}
+          pageSize={PAGE_SIZE}
+          hasNext={hasNext}
+          hasPrevious={hasPrevious}
+          onPageChange={handlePageChange}
           isLoading={isLoading}
         />
 
@@ -422,4 +451,3 @@ export const DeveloperAssignedIssuesPage: React.FC = () => {
   );
 };
 export default DeveloperAssignedIssuesPage;
-

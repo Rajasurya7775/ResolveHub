@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, SignupFormData } from '../types/user';
-import { apiLogin, apiSignup } from '../services/api/authService';
+import { apiLogin, apiSignup, apiGetProfile } from '../services/api/authService';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -10,6 +10,7 @@ interface AuthContextType {
   signup: (data: SignupFormData) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   updateProfile: (updatedData: Partial<User>) => void;
+  refreshProfile: () => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -113,6 +114,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(sanitized);
   };
 
+  const refreshProfile = useCallback(async () => {
+    const token = localStorage.getItem('resolvehub_auth_token');
+    if (!token) return;
+    try {
+      const res = await apiGetProfile();
+      if (res.success && res.user) {
+        const newUser = res.user;
+        setCurrentUser((prev) => {
+          if (!prev) return newUser;
+          if (
+            prev.id === newUser.id &&
+            prev.employeeId === newUser.employeeId &&
+            prev.role === newUser.role &&
+            prev.name === newUser.name &&
+            prev.email === newUser.email
+          ) {
+            return prev;
+          }
+          return newUser;
+        });
+      }
+    } catch {
+      // silently fallback to current user session
+    }
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -123,6 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signup,
         logout,
         updateProfile,
+        refreshProfile,
         isAuthenticated: !!currentUser
       }}
     >

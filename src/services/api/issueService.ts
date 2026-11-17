@@ -15,13 +15,18 @@ function getAuthHeaders(): HeadersInit {
  * Normalizes backend issue payload (snake_case matching ERD or camelCase) into frontend Issue model
  */
 export function normalizeIssue(item: any): Issue {
-  const desc = item.issue_description || item.description || '';
-  const shortDesc = item.short_description || (desc.length > 85 ? `${desc.substring(0, 85)}...` : desc);
+  const desc = typeof item.issue_description === 'string'
+    ? item.issue_description
+    : (typeof item.description === 'string' ? item.description : '');
+  const shortDesc = typeof item.short_description === 'string'
+    ? item.short_description
+    : (desc.length > 85 ? `${desc.substring(0, 85)}...` : desc);
 
   // Normalize status
-  let status = item.issue_status || item.status || 'Open';
-  if (typeof status === 'string') {
-    const s = status.trim().toUpperCase();
+  let rawStatus = item.issue_status || item.status || 'Open';
+  let status: any = 'Open';
+  if (typeof rawStatus === 'string') {
+    const s = rawStatus.trim().toUpperCase();
     if (s === 'OPEN') status = 'Open';
     else if (s === 'ACCEPTED') status = 'Accepted';
     else if (s === 'IN PROGRESS' || s === 'IN_PROGRESS' || s === 'INPROGRESS') status = 'In progress';
@@ -29,31 +34,129 @@ export function normalizeIssue(item: any): Issue {
     else if (s === 'PENDING') status = 'Pending';
     else if (s === 'ON HOLD' || s === 'ON_HOLD') status = 'On Hold';
     else if (s === 'ESCALATED') status = 'Escalated';
+    else status = rawStatus;
   }
 
+  // Normalize project: ensure projectId and projectName are ALWAYS clean strings, never objects
+  let projectName = '';
+  let projectId = '';
+
+  if (item.project && typeof item.project === 'object') {
+    projectName = item.project.project_name || item.project.name || item.project.title || '';
+    projectId = item.project.project_id != null
+      ? String(item.project.project_id)
+      : (item.project.id != null ? String(item.project.id) : projectName);
+  } else if (typeof item.project === 'string') {
+    projectName = item.project;
+    projectId = item.project;
+  }
+
+  if (!projectName && typeof item.project_name === 'string') {
+    projectName = item.project_name;
+  }
+  if (!projectName && typeof item.projectName === 'string') {
+    projectName = item.projectName;
+  }
+  if (!projectId && item.project_id != null) {
+    projectId = String(item.project_id);
+  }
+  if (!projectId && typeof item.projectId === 'string') {
+    projectId = item.projectId;
+  }
+
+  projectName = projectName || projectId || 'Nokia Production Dashboard';
+  projectId = projectId || projectName;
+
+  // Normalize Title
+  let title = 'Untitled Issue';
+  if (typeof item.issue_title === 'string') title = item.issue_title;
+  else if (typeof item.title === 'string') title = item.title;
+
+  // Normalize Issue Type
+  let issueType = 'Front-end';
+  if (typeof item.issue_type === 'string') issueType = item.issue_type;
+  else if (typeof item.issueType === 'string') issueType = item.issueType;
+  else if (item.issue_type && typeof item.issue_type === 'object') {
+    issueType = item.issue_type.name || item.issue_type.type || 'Front-end';
+  }
+
+  // Normalize Shift
+  let shift = 'Shift-A';
+  if (typeof item.issue_shift === 'string') shift = item.issue_shift;
+  else if (typeof item.shift === 'string') shift = item.shift;
+  else if (item.issue_shift && typeof item.issue_shift === 'object') {
+    shift = item.issue_shift.name || 'Shift-A';
+  }
+
+  // Normalize Reporter
+  let reportedBy = 'Supporter';
+  if (typeof item.created_by_name === 'string') reportedBy = item.created_by_name;
+  else if (typeof item.reportedBy === 'string') reportedBy = item.reportedBy;
+  else if (typeof item.creator_name === 'string') reportedBy = item.creator_name;
+  else if (item.created_by && typeof item.created_by === 'object') {
+    reportedBy = item.created_by.name || item.created_by.username || 'Supporter';
+  } else if (typeof item.created_by === 'string') {
+    reportedBy = item.created_by;
+  }
+
+  // Normalize Developer Assignee
+  let acceptedDeveloper = 'Unassigned';
+  if (typeof item.accepted_developer_name === 'string') acceptedDeveloper = item.accepted_developer_name;
+  else if (typeof item.assigned_to_name === 'string') acceptedDeveloper = item.assigned_to_name;
+  else if (typeof item.acceptedDeveloper === 'string') acceptedDeveloper = item.acceptedDeveloper;
+  else if (typeof item.assigned_to === 'string') acceptedDeveloper = item.assigned_to;
+  else if (item.accepted_developer && typeof item.accepted_developer === 'object') {
+    acceptedDeveloper = item.accepted_developer.name || item.accepted_developer.username || 'Unassigned';
+  } else if (item.assigned_to && typeof item.assigned_to === 'object') {
+    acceptedDeveloper = item.assigned_to.name || item.assigned_to.username || 'Unassigned';
+  }
+
+  // Normalize Reported Date
+  let reportedDate = new Date().toISOString().split('T')[0];
+  if (typeof item.issue_created_at === 'string') {
+    reportedDate = item.issue_created_at.split('T')[0];
+  } else if (typeof item.created_at === 'string') {
+    reportedDate = item.created_at.split('T')[0];
+  } else if (typeof item.reportedDate === 'string') {
+    reportedDate = item.reportedDate;
+  }
+
+  // Exact mapping per backend format:
+  // issue_id: UUID (e.g. 004cfd00-a551-4284-a397-6c0d77dd2b25)
+  // issue_number: Code (e.g. RES-1012)
+  const rawIssueId = item.issue_id != null ? String(item.issue_id) : (item.id != null ? String(item.id) : '');
+  const rawIssueNumber = item.issue_number != null ? String(item.issue_number) : (item.issueNumber != null ? String(item.issueNumber) : '');
+
+  // The primary unique ID for API calls (PATCH / DELETE / GET by id) is the UUID
+  const id = rawIssueId || rawIssueNumber || `ISS-${Date.now()}`;
+  // The display ticket code is the issue_number
+  const issueNumber = rawIssueNumber || (rawIssueId && rawIssueId.length > 20 ? `RES-${rawIssueId.substring(0, 4).toUpperCase()}` : rawIssueId || id);
+
   return {
-    id: item.issue_number || item.id || `ISS-${item.issue_id ? String(item.issue_id).substring(0, 6) : Date.now()}`,
-    projectId: item.project_name || item.project || item.projectId || (item.project_id ? String(item.project_id) : 'Nokia Production Dashboard'),
-    projectName: item.project_name || item.project || item.projectId,
-    title: item.issue_title || item.title || 'Untitled Issue',
+    id,
+    issueId: rawIssueId || id,
+    issueNumber,
+    issue_id: rawIssueId || id,
+    issue_number: issueNumber,
+    projectId,
+    projectName,
+    title,
     shortDescription: shortDesc,
     description: desc,
-    issueType: item.issue_type || item.issueType || 'Front-end',
-    occurrenceTime: item.issue_time || item.occurrenceTime || new Date().toISOString(),
-    shift: item.issue_shift || item.shift || 'Shift-A',
-    reportedBy: item.created_by_name || item.reportedBy || item.creator_name || 'Supporter',
+    issueType,
+    occurrenceTime: typeof item.issue_time === 'string' ? item.issue_time : (typeof item.occurrenceTime === 'string' ? item.occurrenceTime : new Date().toISOString()),
+    shift,
+    reportedBy,
     reportedById: String(item.issue_created_by || item.reportedById || item.employee_id || ''),
-    reportedDate: item.issue_created_at
-      ? item.issue_created_at.split('T')[0]
-      : (item.reportedDate || new Date().toISOString().split('T')[0]),
-    acceptedDeveloper: item.accepted_developer_name || item.assigned_to_name || item.assigned_to || item.acceptedDeveloper || 'Unassigned',
+    reportedDate,
+    acceptedDeveloper,
     acceptedDeveloperId: item.accepted_by ? String(item.accepted_by) : (item.assigned_to_id || item.acceptedDeveloperId),
     acceptedDate: item.accepted_at || item.acceptedDate,
     status,
-    priority: item.issue_priority || item.priority || 'P2 – Moderate',
-    assignedTo: item.accepted_developer_name || item.assigned_to || item.acceptedDeveloper,
-    rca: item.rca || undefined,
-    resolvedDate: item.resolved_at || item.resolvedDate || undefined,
+    priority: typeof item.issue_priority === 'string' ? item.issue_priority : (typeof item.priority === 'string' ? item.priority : 'P2 – Moderate'),
+    assignedTo: acceptedDeveloper,
+    rca: typeof item.rca === 'string' ? item.rca : undefined,
+    resolvedDate: typeof item.resolved_at === 'string' ? item.resolved_at : (typeof item.resolvedDate === 'string' ? item.resolvedDate : undefined),
     isEligibleForDelete: status === 'Open'
   };
 }
@@ -171,125 +274,289 @@ function normalizePaginatedIssuesResponse(
   };
 }
 
+// In-memory cache for project data, developers, and supporters to avoid duplicate network calls
+let cachedProjects: ProjectItem[] | null = null;
+let cachedProjectsPromise: Promise<{ success: boolean; data: ProjectItem[]; message?: string }> | null = null;
+
+let cachedDevelopers: DeveloperItem[] | null = null;
+let cachedSupporters: DeveloperItem[] | null = null;
+let cachedDevelopersPromise: Promise<{ success: boolean; data: DeveloperItem[]; message?: string }> | null = null;
+let cachedSupportersPromise: Promise<{ success: boolean; data: DeveloperItem[]; message?: string }> | null = null;
+
+export function invalidateProjectsCache() {
+  cachedProjects = null;
+  cachedProjectsPromise = null;
+}
+
+export function invalidateDevelopersCache() {
+  cachedDevelopers = null;
+  cachedDevelopersPromise = null;
+}
+
 /**
- * Fetch projects from API endpoint /issues/projects
+ * Fetch projects from API endpoint /issues/projects (with in-memory caching)
  */
 export async function apiFetchProjects(): Promise<{ success: boolean; data: ProjectItem[]; message?: string }> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+  if (cachedProjects && cachedProjects.length > 0) {
+    return { success: true, data: cachedProjects };
+  }
+  if (cachedProjectsPromise) {
+    return cachedProjectsPromise;
+  }
 
-    let response = await fetch(`${API_BASE_URL}/issues/projects `, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-      signal: controller.signal
-    }).catch(() => null);
+  cachedProjectsPromise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/projects`, {
+      let response = await fetch(`${API_BASE_URL}/issues/projects`, {
         method: 'GET',
         headers: getAuthHeaders(),
         signal: controller.signal
       }).catch(() => null);
-    }
 
-    clearTimeout(timeoutId);
-
-    if (response && response.ok) {
-      const json = await response.json();
-      const rawList = Array.isArray(json) ? json : json.data || json.projects || json.results || [];
-      const list: ProjectItem[] = rawList.map((p: any) => ({
-        id: p.project_id ?? p.id ?? p.projectId ?? String(p),
-        name: p.project_name ?? p.name ?? p.title ?? String(p),
-        description: p.project_description || p.description
-      }));
-      if (list.length > 0) {
-        return { success: true, data: list };
+      if (!response || response.status === 404) {
+        response = await fetch(`${API_BASE_URL}/issues/projects/`, {
+          method: 'GET',
+          headers: getAuthHeaders(),
+          signal: controller.signal
+        }).catch(() => null);
       }
-    }
-  } catch (err: any) {
-    console.warn('Could not fetch projects from API:', err.message);
-  }
 
-  return {
-    success: false,
-    data: [
+      clearTimeout(timeoutId);
+
+      if (response && response.ok) {
+        const json = await response.json();
+        const rawList = Array.isArray(json) ? json : json.data || json.projects || json.results || [];
+        const list: ProjectItem[] = rawList.map((p: any) => {
+          if (typeof p === 'string') {
+            return { id: p, name: p };
+          }
+          const id = p.project_id ?? p.id ?? p.projectId ?? (p.project_name ? String(p.project_name) : 'proj');
+          const name = typeof p.project_name === 'string'
+            ? p.project_name
+            : typeof p.name === 'string'
+              ? p.name
+              : p.title || String(id);
+          return {
+            id: String(id),
+            name: String(name),
+            description: typeof p.project_description === 'string'
+              ? p.project_description
+              : typeof p.description === 'string'
+                ? p.description
+                : undefined
+          };
+        });
+        if (list.length > 0) {
+          cachedProjects = list;
+          return { success: true, data: list };
+        }
+      }
+    } catch (err: any) {
+      console.warn('Could not fetch projects from API:', err.message);
+    } finally {
+      cachedProjectsPromise = null;
+    }
+
+    const fallback: ProjectItem[] = [
       { id: '1', name: 'Nokia Production Dashboard' },
       { id: '2', name: 'Manufacturing Analytics' },
       { id: '3', name: 'Inventory Monitoring' },
       { id: '4', name: 'Network Monitoring' }
-    ]
-  };
+    ];
+    cachedProjects = fallback;
+    return {
+      success: false,
+      data: fallback
+    };
+  })();
+
+  return cachedProjectsPromise;
 }
 
 /**
- * Fetch developers from API endpoint /issues/developers
+ * Fetch developers or supporters from API endpoint:
+ * Supporters: GET /api/v1/issues/support
+ * Developers: GET /api/v1/issues/developers
  */
-export async function apiFetchDevelopers(): Promise<{ success: boolean; data: DeveloperItem[]; message?: string }> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+export async function apiFetchDevelopers(
+  roleTarget: 'developer' | 'supporter' = 'developer'
+): Promise<{ success: boolean; data: DeveloperItem[]; message?: string }> {
+  if (roleTarget === 'supporter') {
+    if (cachedSupporters && cachedSupporters.length > 0) {
+      return { success: true, data: cachedSupporters };
+    }
+    if (cachedSupportersPromise) {
+      return cachedSupportersPromise;
+    }
+  } else {
+    if (cachedDevelopers && cachedDevelopers.length > 0) {
+      return { success: true, data: cachedDevelopers };
+    }
+    if (cachedDevelopersPromise) {
+      return cachedDevelopersPromise;
+    }
+  }
 
-    let response = await fetch(`${API_BASE_URL}/issues/developers `, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-      signal: controller.signal
-    }).catch(() => null);
+  const promise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/developers/`, {
+      const endpoint = roleTarget === 'supporter'
+        ? `${API_BASE_URL}/issues/support`
+        : `${API_BASE_URL}/issues/developers`;
+
+      let response = await fetch(endpoint, {
         method: 'GET',
         headers: getAuthHeaders(),
         signal: controller.signal
       }).catch(() => null);
-    }
 
-    clearTimeout(timeoutId);
+      if (!response || response.status === 404) {
+        response = await fetch(`${endpoint}/`, {
+          method: 'GET',
+          headers: getAuthHeaders(),
+          signal: controller.signal
+        }).catch(() => null);
+      }
 
-    if (response && response.ok) {
-      const json = await response.json();
-      const rawList = Array.isArray(json) ? json : json.data || json.developers || json.users || json.results || [];
-      const list: DeveloperItem[] = rawList.map((d: any) => ({
-        id: d.user_id ?? d.id ?? d.employee_id ?? String(d),
-        name: d.full_name ?? d.name ?? d.username ?? `Developer ${d.id || ''}`,
-        employeeId: d.employee_id || d.employeeId || '',
-        roleType: d.role_type || d.roleType || '',
-        email: d.email || d.emial || ''
-      }));
-      if (list.length > 0) {
-        return { success: true, data: list };
+      clearTimeout(timeoutId);
+
+      if (response && response.ok) {
+        const json = await response.json();
+        const rawList = Array.isArray(json) ? json : json.data || json.developers || json.users || json.results || json.supporters || [];
+        const list: DeveloperItem[] = rawList.map((d: any) => ({
+          id: d.user_id ?? d.id ?? d.employee_id ?? String(d),
+          name: d.full_name ?? d.name ?? d.username ?? `User ${d.id || ''}`,
+          employeeId: d.employee_id || d.employeeId || '',
+          roleType: d.role_type || d.roleType || '',
+          email: d.email || d.emial || ''
+        }));
+        if (list.length > 0) {
+          if (roleTarget === 'supporter') {
+            cachedSupporters = list;
+          } else {
+            cachedDevelopers = list;
+          }
+          return { success: true, data: list };
+        }
+      }
+    } catch (err: any) {
+      console.warn(`Could not fetch ${roleTarget} from API:`, err.message);
+    } finally {
+      if (roleTarget === 'supporter') {
+        cachedSupportersPromise = null;
+      } else {
+        cachedDevelopersPromise = null;
       }
     }
-  } catch (err: any) {
-    console.warn('Could not fetch developers from API:', err.message);
+
+    return {
+      success: false,
+      data: []
+    };
+  })();
+
+  if (roleTarget === 'supporter') {
+    cachedSupportersPromise = promise;
+  } else {
+    cachedDevelopersPromise = promise;
   }
 
-  return {
-    success: false,
-    data: []
-  };
+  return promise;
+}
+
+/**
+ * Helper to build query parameters matching the exact FastAPI backend parameters:
+ * search, project_name, issue_type, shift, issue_status, date_from, date_to, page, page_size
+ */
+export function buildFilterQueryParams(
+  params?: FetchIssuesParams,
+  requestedPage = 1,
+  requestedPageSize = 10
+): URLSearchParams {
+  const query = new URLSearchParams({
+    page: String(requestedPage),
+    page_size: String(requestedPageSize)
+  });
+
+  // 1. Search: matches issue_number or issue_title
+  if (params?.search?.trim()) {
+    query.append('search', params.search.trim());
+  }
+
+  // 2. Project Name: backend uses project_name parameter
+  const projectVal = (params?.projectName || params?.project || '').trim();
+  if (projectVal && projectVal !== 'All') {
+    query.append('project_name', projectVal);
+    query.append('project', projectVal);
+  }
+
+  // 3. Issue Type: backend stores FRONTEND, BACKEND, DATABASE, etc.
+  if (params?.issueType && params.issueType !== 'All') {
+    const rawType = params.issueType.trim();
+    let backendType = rawType;
+    const upper = rawType.toUpperCase();
+    if (upper.includes('FRONT')) backendType = 'FRONTEND';
+    else if (upper.includes('BACK')) backendType = 'BACKEND';
+    else if (upper.includes('DATA')) backendType = 'DATABASE';
+    else if (upper.includes('HARD')) backendType = 'HARDWARE';
+    else if (upper.includes('OTHER')) backendType = 'OTHERS';
+
+    query.append('issue_type', backendType);
+  }
+
+  // 4. Shift: backend stores 'A', 'B', 'C'
+  if (params?.shift && params.shift !== 'All') {
+    const rawShift = params.shift.trim();
+    let backendShift = rawShift;
+    if (rawShift.includes('A')) backendShift = 'A';
+    else if (rawShift.includes('B')) backendShift = 'B';
+    else if (rawShift.includes('C')) backendShift = 'C';
+    else if (rawShift.toLowerCase().includes('gen')) backendShift = 'General';
+
+    query.append('shift', backendShift);
+  }
+
+  // 5. Issue Status: backend uses issue_status parameter with values OPEN, IN_PROGRESS, RESOLVED, HOLD
+  if (params?.status && params.status !== 'All') {
+    const rawStatus = params.status.trim().toUpperCase();
+    let backendStatus = rawStatus;
+    if (rawStatus === 'OPEN') backendStatus = 'OPEN';
+    else if (rawStatus.includes('PROGRESS')) backendStatus = 'IN_PROGRESS';
+    else if (rawStatus.includes('RESOLV') || rawStatus === 'CLOSED') backendStatus = 'RESOLVED';
+    else if (rawStatus.includes('HOLD') || rawStatus.includes('PEND')) backendStatus = 'HOLD';
+    else if (rawStatus.includes('ACCEPT')) backendStatus = 'OPEN';
+
+    query.append('issue_status', backendStatus);
+    query.append('status', backendStatus);
+  }
+
+  // 6. Date Range: backend uses date_from and date_to (format YYYY-MM-DD)
+  if (params?.date) {
+    query.append('date_from', params.date);
+    query.append('date_to', params.date);
+    query.append('date', params.date);
+  } else {
+    if (params?.dateFrom) query.append('date_from', params.dateFrom);
+    if (params?.dateTo) query.append('date_to', params.dateTo);
+  }
+
+  return query;
 }
 
 /**
  * Fetch My Issues from backend API:
- * GET http://10.91.17.113:8000/api/v1/my-issues/
+ * GET /api/v1/my-issues
  */
 export async function apiFetchMyIssues(
   params?: FetchIssuesParams
 ): Promise<{ success: boolean; data?: PaginatedIssuesResponse; message?: string }> {
   const requestedPage = params?.page ?? 1;
   const requestedPageSize = params?.pageSize ?? 10;
-  const query = new URLSearchParams({
-    page: String(requestedPage),
-    page_size: String(requestedPageSize)
-  });
-
-  if (params?.project && params.project !== 'All') query.append('project', params.project);
-  if (params?.issueType && params.issueType !== 'All') query.append('issue_type', params.issueType);
-  if (params?.date) query.append('date', params.date);
-  if (params?.shift && params.shift !== 'All') query.append('shift', params.shift);
-  if (params?.status && params.status !== 'All') query.append('status', params.status);
-  if (params?.search?.trim()) query.append('search', params.search.trim());
+  const query = buildFilterQueryParams(params, requestedPage, requestedPageSize);
 
   try {
     const controller = new AbortController();
@@ -347,28 +614,18 @@ export async function apiFetchMyIssues(
 
 /**
  * Fetch Previous Issues from backend API with pagination and filter support:
- * GET http://10.91.17.113:8000/api/v1/previous-issues/?page=1&page_size=10
+ * GET /api/v1/previous-issues
  */
 export async function apiFetchPreviousIssues(
   params?: FetchIssuesParams
 ): Promise<{ success: boolean; data?: PaginatedIssuesResponse; message?: string }> {
   const requestedPage = params?.page ?? 1;
   const requestedPageSize = params?.pageSize ?? 10;
+  const query = buildFilterQueryParams(params, requestedPage, requestedPageSize);
 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
-    const query = new URLSearchParams();
-
-    query.append('page', String(requestedPage));
-    query.append('page_size', String(requestedPageSize));
-
-    if (params?.project && params.project !== 'All') query.append('project', params.project);
-    if (params?.issueType && params.issueType !== 'All') query.append('issue_type', params.issueType);
-    if (params?.date) query.append('date', params.date);
-    if (params?.shift && params.shift !== 'All') query.append('shift', params.shift);
-    if (params?.status && params.status !== 'All') query.append('status', params.status);
-    if (params?.search?.trim()) query.append('search', params.search.trim());
 
     const qs = query.toString();
     let response = await fetch(`${API_BASE_URL}/previous-issues/?${qs}`, {
@@ -421,139 +678,106 @@ export async function apiFetchPreviousIssues(
 }
 
 /**
- * Fetch Project Names for Previous Issues:
- * GET /api/v1/previous-issues/projects
+ * Fetch Project Names for Previous Issues (reusing unified project cache)
  */
 export async function apiFetchPreviousIssuesProjects(): Promise<{ success: boolean; data: string[]; message?: string }> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    let response = await fetch(`${API_BASE_URL}/previous-issues/projects`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-      signal: controller.signal
-    }).catch(() => null);
-
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/previous-issues/projects/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal: controller.signal
-      }).catch(() => null);
-    }
-
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/projects/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal: controller.signal
-      }).catch(() => null);
-    }
-
-    clearTimeout(timeoutId);
-
-    if (response && response.ok) {
-      const json = await response.json();
-      const rawList = Array.isArray(json) ? json : json.data || json.projects || json.items || [];
-      const names: string[] = rawList
-        .map((p: any) => (typeof p === 'string' ? p : p.project_name || p.name || p.title || p.id))
-        .filter((n: any) => typeof n === 'string' && n.trim().length > 0);
-      if (names.length > 0) {
-        return { success: true, data: Array.from(new Set(names)) };
-      }
-    }
-  } catch (err: any) {
-    console.warn('Could not fetch previous-issues projects:', err.message);
+  const res = await apiFetchProjects();
+  if (res.success && res.data.length > 0) {
+    const names = Array.from(
+      new Set(
+        res.data
+          .map((p: any) => {
+            if (typeof p === 'string') return p;
+            if (p && typeof p === 'object') {
+              return typeof p.name === 'string' ? p.name : (typeof p.project_name === 'string' ? p.project_name : String(p.id || ''));
+            }
+            return String(p || '');
+          })
+          .filter(Boolean)
+      )
+    );
+    return { success: true, data: names };
   }
-
-  return {
-    success: false,
-    data: []
-  };
+  return { success: false, data: [] };
 }
 
 /**
- * Fetch Project Names for My Issues:
- * GET /api/v1/my-issues/projects
+ * Fetch Project Names for My Issues (reusing unified project cache)
  */
 export async function apiFetchMyIssuesProjects(): Promise<{ success: boolean; data: string[]; message?: string }> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    let response = await fetch(`${API_BASE_URL}/my-issues/projects`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-      signal: controller.signal
-    }).catch(() => null);
-
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/my-issues/projects/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal: controller.signal
-      }).catch(() => null);
-    }
-
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/projects/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal: controller.signal
-      }).catch(() => null);
-    }
-
-    clearTimeout(timeoutId);
-
-    if (response && response.ok) {
-      const json = await response.json();
-      const rawList = Array.isArray(json) ? json : json.data || json.projects || json.items || [];
-      const names: string[] = rawList
-        .map((p: any) => (typeof p === 'string' ? p : p.project_name || p.name || p.title || p.id))
-        .filter((n: any) => typeof n === 'string' && n.trim().length > 0);
-      if (names.length > 0) {
-        return { success: true, data: Array.from(new Set(names)) };
-      }
-    }
-  } catch (err: any) {
-    console.warn('Could not fetch my-issues projects:', err.message);
+  const res = await apiFetchProjects();
+  if (res.success && res.data.length > 0) {
+    const names = Array.from(
+      new Set(
+        res.data
+          .map((p: any) => {
+            if (typeof p === 'string') return p;
+            if (p && typeof p === 'object') {
+              return typeof p.name === 'string' ? p.name : (typeof p.project_name === 'string' ? p.project_name : String(p.id || ''));
+            }
+            return String(p || '');
+          })
+          .filter(Boolean)
+      )
+    );
+    return { success: true, data: names };
   }
-
-  return {
-    success: false,
-    data: []
-  };
+  return { success: false, data: [] };
 }
 
 /**
  * Fetch a single issue by ID from the backend API
  */
-export async function apiFetchIssueById(issueId: string): Promise<{ success: boolean; data?: Issue; message?: string }> {
+export async function apiFetchIssueById(
+  issueId: string,
+  source: 'my-issues' | 'previous-issues' = 'my-issues'
+): Promise<{ success: boolean; data?: Issue; message?: string }> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    let response = await fetch(`${API_BASE_URL}/my-issues/${issueId}/`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-      signal: controller.signal
-    }).catch(() => null);
+    let targetId = issueId.trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
 
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/previous-issues/${issueId}/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal: controller.signal
-      }).catch(() => null);
+    if (!isUuid) {
+      // If targetId is an issue_number like "RES-1012", search by issue_number to resolve its UUID
+      const searchRes = source === 'previous-issues'
+        ? await apiFetchPreviousIssues({ search: targetId, pageSize: 5 })
+        : await apiFetchMyIssues({ search: targetId, pageSize: 5 });
+
+      if (searchRes.success && searchRes.data && searchRes.data.items.length > 0) {
+        const found = searchRes.data.items.find(
+          (i) => i.issueNumber === targetId || i.id === targetId || i.issueId === targetId
+        ) || searchRes.data.items[0];
+        if (found && found.id && found.id !== targetId) {
+          targetId = found.id;
+        }
+      }
     }
 
-    if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/${issueId}/`, {
+    const endpoints = source === 'previous-issues'
+      ? [
+          `${API_BASE_URL}/previous-issues/${targetId}`,
+          `${API_BASE_URL}/previous-issues/${targetId}/`,
+          `${API_BASE_URL}/issues/${targetId}`,
+          `${API_BASE_URL}/my-issues/${targetId}`
+        ]
+      : [
+          `${API_BASE_URL}/my-issues/${targetId}`,
+          `${API_BASE_URL}/my-issues/${targetId}/`,
+          `${API_BASE_URL}/issues/${targetId}`,
+          `${API_BASE_URL}/previous-issues/${targetId}`
+        ];
+
+    let response: Response | null = null;
+    for (const url of endpoints) {
+      response = await fetch(url, {
         method: 'GET',
         headers: getAuthHeaders(),
         signal: controller.signal
       }).catch(() => null);
+      if (response && response.ok) break;
+      if (response && response.status !== 404 && response.status !== 422) break;
     }
 
     clearTimeout(timeoutId);
@@ -575,7 +799,8 @@ export async function apiFetchIssueById(issueId: string): Promise<{ success: boo
  */
 export async function apiUpdateIssue(
   issueId: string,
-  updatedFields: Partial<Issue>
+  updatedFields: Partial<Issue>,
+  source: 'my-issues' | 'previous-issues' = 'my-issues'
 ): Promise<{ success: boolean; data?: Issue; message?: string }> {
   try {
     const payload: Record<string, any> = {};
@@ -611,14 +836,29 @@ export async function apiUpdateIssue(
       payload.rca = updatedFields.rca;
     }
 
-    let response = await fetch(`${API_BASE_URL}/my-issues/${issueId}/`, {
+    const primaryUrl = source === 'previous-issues'
+      ? `${API_BASE_URL}/previous-issues/${issueId}`
+      : `${API_BASE_URL}/my-issues/${issueId}`;
+    const fallbackUrl = source === 'previous-issues'
+      ? `${API_BASE_URL}/previous-issues/${issueId}/`
+      : `${API_BASE_URL}/my-issues/${issueId}/`;
+
+    let response = await fetch(primaryUrl, {
       method: 'PATCH',
       headers: getAuthHeaders(),
       body: JSON.stringify(payload)
     }).catch(() => null);
 
     if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/${issueId}/`, {
+      response = await fetch(fallbackUrl, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      }).catch(() => null);
+    }
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
         body: JSON.stringify(payload)
@@ -721,15 +961,32 @@ export async function apiCreateIssue(data: {
 /**
  * Delete an issue on the backend
  */
-export async function apiDeleteIssue(issueId: string): Promise<{ success: boolean; message?: string }> {
+export async function apiDeleteIssue(
+  issueId: string,
+  source: 'my-issues' | 'previous-issues' = 'my-issues'
+): Promise<{ success: boolean; message?: string }> {
   try {
-    let response = await fetch(`${API_BASE_URL}/my-issues/${issueId}/`, {
+    const primaryUrl = source === 'previous-issues'
+      ? `${API_BASE_URL}/previous-issues/${issueId}`
+      : `${API_BASE_URL}/my-issues/${issueId}`;
+    const fallbackUrl = source === 'previous-issues'
+      ? `${API_BASE_URL}/previous-issues/${issueId}/`
+      : `${API_BASE_URL}/my-issues/${issueId}/`;
+
+    let response = await fetch(primaryUrl, {
       method: 'DELETE',
       headers: getAuthHeaders()
     }).catch(() => null);
 
     if (!response || response.status === 404) {
-      response = await fetch(`${API_BASE_URL}/issues/${issueId}/`, {
+      response = await fetch(fallbackUrl, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      }).catch(() => null);
+    }
+
+    if (!response || response.status === 404) {
+      response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
         method: 'DELETE',
         headers: getAuthHeaders()
       }).catch(() => null);
