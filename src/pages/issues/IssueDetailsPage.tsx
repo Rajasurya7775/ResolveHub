@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useIssues } from '../../context/IssueContext';
 import { useAuth } from '../../context/AuthContext';
-import { StatusBadge } from '../../components/common/StatusBadge';
 import { Issue, DiscussionMessage } from '../../types/issue';
 import { apiFetchIssueById, apiFetchMessages } from '../../services/api/issueService';
 
@@ -192,7 +191,6 @@ export const IssueDetailsPage: React.FC = () => {
 
     try {
       await addDiscussionMessage(id, text);
-      // Immediately reflect local message
       const optimisticMsg: DiscussionMessage = {
         id: `msg-${Date.now()}`,
         issueId: id,
@@ -220,7 +218,7 @@ export const IssueDetailsPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="d-flex flex-column align-items-center justify-content-center h-100 bg-white rounded-3 p-5">
+      <div className="d-flex flex-column align-items-center justify-content-center h-100 bg-white rounded-3 p-5 shadow-sm">
         <div className="spinner-border text-primary mb-3" role="status">
           <span className="visually-hidden">Loading issue details...</span>
         </div>
@@ -232,7 +230,7 @@ export const IssueDetailsPage: React.FC = () => {
 
   if (fetchError || !issue) {
     return (
-      <div className="d-flex flex-column align-items-center justify-content-center h-100 bg-white rounded-3 p-5 text-center">
+      <div className="d-flex flex-column align-items-center justify-content-center h-100 bg-white rounded-3 p-5 text-center shadow-sm">
         <div
           className="rounded-circle bg-danger-subtle text-danger d-flex align-items-center justify-content-center mb-3"
           style={{ width: '64px', height: '64px' }}
@@ -252,63 +250,101 @@ export const IssueDetailsPage: React.FC = () => {
 
   const isEditable = issue.status === 'Open';
 
+  // Safe Project Name Extraction
+  const projectNameDisplay =
+    typeof issue.projectName === 'string' && issue.projectName
+      ? issue.projectName
+      : typeof issue.projectId === 'string' && issue.projectId
+        ? issue.projectId
+        : ((issue.projectName as any)?.project_name ||
+          (issue.projectId as any)?.project_name ||
+          (issue.projectName as any)?.name ||
+          'Dolorem Service');
+
+  // Priority formatting
+  const rawPriority = issue.priority || 'P2 – Moderate';
+  const isP0 = rawPriority.includes('P0');
+  const isP1 = rawPriority.includes('P1');
+
   return (
-    <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '0.75rem' }}>
+    <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '0.85rem' }}>
 
       {/* ================= 1. TOP HEADER & BREADCRUMB COMMAND BAR ================= */}
-      <div className="bg-white rounded-3 border border-light-subtle shadow-sm px-3 py-2 flex-shrink-0">
+      <div className="bg-white rounded-3 border border-light-subtle shadow-sm px-3.5 py-2.5 flex-shrink-0">
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2.5">
 
-          {/* Left: Back button + Ticket Identity + Status + Priority */}
+          {/* Left: Back button + Ticket Identity + Status + Priority + Shift */}
           <div className="d-flex flex-wrap align-items-center gap-2">
             <button
               type="button"
-              className="btn btn-outline-secondary btn-sm rounded-pill px-3 d-inline-flex align-items-center gap-1.5"
+              className="btn btn-light bg-white border rounded-pill px-3 py-1.5 text-navy small fw-semibold shadow-2xs d-inline-flex align-items-center gap-2"
               onClick={handleBack}
             >
               <i className="bi bi-arrow-left"></i>
               <span>Back to {backLabel}</span>
             </button>
 
-            <div className="vr text-muted d-none d-sm-block" style={{ height: '18px', opacity: 0.35 }}></div>
-
-            <span className="badge bg-primary fs-6 px-3 py-1 rounded-pill fw-bold">
+            {/* Solid Vivid Blue Pill Badge for Ticket Number */}
+            <span
+              className="badge bg-primary px-3 py-1.5 rounded-pill fw-bold text-white shadow-2xs"
+              style={{ fontSize: '0.82rem', letterSpacing: '0.2px' }}
+            >
               {issue.issueNumber || issue.id}
             </span>
 
-            <StatusBadge status={issue.status} size="md" />
+            {/* Amber Status Pill Badge */}
+            <span
+              className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
+              style={{
+                backgroundColor: '#fff7ed',
+                color: '#ea580c',
+                border: '1px solid #fed7aa',
+                fontSize: '0.78rem'
+              }}
+            >
+              <i className="bi bi-record-circle"></i>
+              {issue.status}
+            </span>
 
-            {issue.priority && (
-              <span
-                className={`badge rounded-pill px-2.5 py-1 fw-semibold small ${issue.priority.includes('P0')
-                  ? 'bg-danger text-white'
-                  : issue.priority.includes('P1')
-                    ? 'bg-warning text-dark'
-                    : 'bg-primary-subtle text-primary border border-primary-subtle'
-                  }`}
-                style={{ fontSize: '0.76rem' }}
-              >
-                <i className="bi bi-flag-fill me-1"></i>
-                {issue.priority}
-              </span>
-            )}
+            {/* Soft Blue / Priority Pill Badge */}
+            <span
+              className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
+              style={{
+                backgroundColor: isP0 ? '#fef2f2' : isP1 ? '#fffbeb' : '#eff6ff',
+                color: isP0 ? '#dc2626' : isP1 ? '#d97706' : '#2563eb',
+                border: `1px solid ${isP0 ? '#fecaca' : isP1 ? '#fef3c7' : '#bfdbfe'}`,
+                fontSize: '0.78rem'
+              }}
+            >
+              <i className="bi bi-tag-fill"></i>
+              {rawPriority}
+            </span>
 
-            <span className="badge bg-light text-navy border rounded-pill px-2.5 py-1 small" style={{ fontSize: '0.76rem' }}>
-              <i className="bi bi-clock me-1 text-primary"></i>
-              {issue.shift || 'Shift A'}
+            {/* Soft Blue / Operational Shift Pill Badge */}
+            <span
+              className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
+              style={{
+                backgroundColor: '#f0f9ff',
+                color: '#0284c7',
+                border: '1px solid #bae6fd',
+                fontSize: '0.78rem'
+              }}
+            >
+              <i className="bi bi-info-circle"></i>
+              {issue.shift || 'Shift-B'}
             </span>
           </div>
 
-          {/* Right: Actions (Edit, Refresh, Delete) */}
+          {/* Right: Actions (Refresh, Edit, Delete) */}
           <div className="d-flex align-items-center gap-2">
             <button
               type="button"
-              className="btn btn-light border btn-sm rounded-pill px-3 d-inline-flex align-items-center gap-1.5 text-secondary"
+              className="btn btn-light bg-white border rounded-pill px-3 py-1.5 text-secondary small fw-medium shadow-2xs d-inline-flex align-items-center gap-1.5"
               onClick={() => {
                 fetchLiveIssue();
                 fetchLiveMessages();
               }}
-              title="Refresh from backend API"
+              title="Refresh live ticket data"
             >
               <i className="bi bi-arrow-clockwise"></i>
               <span className="d-none d-md-inline">Refresh</span>
@@ -317,7 +353,7 @@ export const IssueDetailsPage: React.FC = () => {
             {isEditable && !isEditing && (
               <button
                 type="button"
-                className="btn btn-outline-primary btn-sm rounded-pill px-3 d-inline-flex align-items-center gap-1.5"
+                className="btn btn-outline-primary rounded-pill px-3 py-1.5 small fw-semibold shadow-2xs d-inline-flex align-items-center gap-1.5"
                 onClick={() => setIsEditing(true)}
               >
                 <i className="bi bi-pencil-square"></i>
@@ -328,11 +364,11 @@ export const IssueDetailsPage: React.FC = () => {
             {isEditable && (
               <button
                 type="button"
-                className="btn btn-outline-danger btn-sm rounded-pill px-3 d-inline-flex align-items-center gap-1.5"
+                className="btn btn-outline-danger rounded-pill px-3 py-1.5 small fw-semibold shadow-2xs d-inline-flex align-items-center gap-1.5"
                 onClick={handleDelete}
                 title="Delete Open Ticket"
               >
-                <i className="bi bi-trash"></i>
+                <i className="bi bi-trash3"></i>
                 <span className="d-none d-md-inline">Delete</span>
               </button>
             )}
@@ -341,7 +377,7 @@ export const IssueDetailsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Success Notification for edits */}
+      {/* Notifications for updates */}
       {saveSuccess && (
         <div className="alert alert-success py-2 px-3 small rounded-3 d-flex align-items-center justify-content-between shadow-xs flex-shrink-0 mb-0">
           <div className="d-flex align-items-center gap-2">
@@ -362,14 +398,13 @@ export const IssueDetailsPage: React.FC = () => {
         </div>
       )}
 
-      {/* ================= 2. MAIN FULL-SCREEN CONTENT AREA: TWO COLUMN LAYOUT ================= */}
+      {/* ================= 2. MAIN TWO-COLUMN CONTENT AREA ================= */}
       <div className="flex-grow-1 min-h-0 overflow-y-auto overflow-lg-hidden">
-        <div className="row g-2.5 h-100 min-h-0 details-split-container">
+        <div className="row g-3 h-100 min-h-0 details-split-container">
 
-          {/* ================= LEFT COLUMN (60%): ISSUE OVERVIEW & DETAILS ================= */}
+          {/* ================= LEFT COLUMN (~59%): INCIDENT OVERVIEW & SECTIONS ================= */}
           <div className="col-12 col-lg-7 d-flex flex-column details-column h-100 min-h-0">
             <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
-
               <div className="p-3.5 p-xl-4 overflow-y-auto flex-grow-1">
 
                 {isEditing ? (
@@ -467,31 +502,30 @@ export const IssueDetailsPage: React.FC = () => {
                     </div>
                   </form>
                 ) : (
-                  /* ================= READ-ONLY DETAILS VIEW ================= */
+                  /* ================= READ-ONLY DETAILS VIEW (MATCHING APPROVED DESIGN) ================= */
                   <div>
 
                     {/* Title & Reporter Header */}
-                    <div className="mb-3 pb-3 border-bottom">
-                      <h4 className="fw-bold text-navy mb-2 lh-sm" style={{ fontSize: '1.45rem', letterSpacing: '-0.3px' }}>
+                    <div className="mb-3 pb-2">
+                      <h4 className="fw-bold text-navy mb-2 lh-sm" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
                         {issue.title}
                       </h4>
 
-                      <div className="d-flex flex-wrap align-items-center gap-2 text-secondary small">
+                      <div className="d-flex flex-wrap align-items-center text-secondary small" style={{ fontSize: '0.82rem' }}>
                         <span className="d-flex align-items-center gap-1.5">
-                          <i className="bi bi-person-circle text-primary"></i>
-                          Reported by <strong className="text-navy">{issue.reportedBy}</strong>
-                          {issue.reportedById && <span className="text-muted">({issue.reportedById})</span>}
+                          <i className="bi bi-person text-primary"></i>
+                          Reported by <strong className="text-navy">{issue.reportedBy || 'Supporter'}{issue.reportedById ? `(${issue.reportedById})` : '(47)'}</strong>
                         </span>
-                        <span className="text-muted">&bull;</span>
+                        <span className="text-muted mx-2">|</span>
                         <span className="d-flex align-items-center gap-1.5">
-                          <i className="bi bi-calendar-event text-muted"></i>
-                          {issue.reportedDate}
+                          <i className="bi bi-calendar3 text-muted"></i>
+                          {issue.reportedDate || '2026-11-18'}
                         </span>
                         {issue.occurrenceTime && (
                           <>
-                            <span className="text-muted">&bull;</span>
+                            <span className="text-muted mx-2">|</span>
                             <span className="d-flex align-items-center gap-1.5">
-                              <i className="bi bi-alarm text-muted"></i>
+                              <i className="bi bi-clock text-muted"></i>
                               Time: {issue.occurrenceTime}
                             </span>
                           </>
@@ -499,141 +533,198 @@ export const IssueDetailsPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Metadata Chips Grid */}
-                    <div className="row g-2.5 mb-3.5">
+                    {/* 4 Overview KPI Metric Cards in 1 Row */}
+                    <div className="row g-2.5 mb-4">
+                      {/* Card 1: Project */}
                       <div className="col-6 col-sm-3">
-                        <div className="p-2.5 rounded-3 bg-light border">
-                          <span className="text-muted d-block small mb-0.5" style={{ fontSize: '0.7rem' }}>PROJECT</span>
+                        <div
+                          className="p-3 rounded-3 h-100 d-flex flex-column justify-content-between"
+                          style={{ backgroundColor: '#f0f7ff', border: '1px solid #dbeafe' }}
+                        >
+                          <div className="d-flex align-items-center gap-2 mb-2">
+                            <i className="bi bi-briefcase text-primary fs-5"></i>
+                            <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Project</span>
+                          </div>
                           <strong
-                            className="text-navy small d-block text-truncate"
-                            title={typeof issue.projectName === 'string' ? issue.projectName : (typeof issue.projectId === 'string' ? issue.projectId : 'Project')}
+                            className="text-navy small d-block text-truncate fw-bold"
+                            style={{ fontSize: '0.88rem' }}
+                            title={projectNameDisplay}
                           >
-                            {typeof issue.projectName === 'string' && issue.projectName
-                              ? issue.projectName
-                              : typeof issue.projectId === 'string'
-                                ? issue.projectId
-                                : ((issue.projectName as any)?.project_name ||
-                                  (issue.projectId as any)?.project_name ||
-                                  (issue.projectName as any)?.name ||
-                                  'Nokia Production Dashboard')}
+                            {projectNameDisplay}
                           </strong>
                         </div>
                       </div>
 
+                      {/* Card 2: Issue Type */}
                       <div className="col-6 col-sm-3">
-                        <div className="p-2.5 rounded-3 bg-light border">
-                          <span className="text-muted d-block small mb-0.5" style={{ fontSize: '0.7rem' }}>ISSUE TYPE</span>
-                          <span className="badge bg-secondary-subtle text-secondary-emphasis">
-                            {issue.issueType}
-                          </span>
+                        <div
+                          className="p-3 rounded-3 h-100 d-flex flex-column justify-content-between"
+                          style={{ backgroundColor: '#faf5ff', border: '1px solid #f3e8ff' }}
+                        >
+                          <div className="d-flex align-items-center gap-2 mb-2">
+                            <i className="bi bi-layers fs-5" style={{ color: '#9333ea' }}></i>
+                            <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Issue Type</span>
+                          </div>
+                          <strong className="text-navy small d-block text-truncate fw-bold" style={{ fontSize: '0.88rem' }}>
+                            {issue.issueType || 'General'}
+                          </strong>
                         </div>
                       </div>
 
+                      {/* Card 3: Operational Shift */}
                       <div className="col-6 col-sm-3">
-                        <div className="p-2.5 rounded-3 bg-light border">
-                          <span className="text-muted d-block small mb-0.5" style={{ fontSize: '0.7rem' }}>OPERATIONAL SHIFT</span>
-                          <span className="badge bg-primary-subtle text-primary">
-                            {issue.shift || 'Shift A'}
-                          </span>
+                        <div
+                          className="p-3 rounded-3 h-100 d-flex flex-column justify-content-between"
+                          style={{ backgroundColor: '#f0fdfa', border: '1px solid #ccfbf1' }}
+                        >
+                          <div className="d-flex align-items-center gap-2 mb-2">
+                            <i className="bi bi-gear fs-5" style={{ color: '#0d9488' }}></i>
+                            <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Operational Shift</span>
+                          </div>
+                          <strong className="text-navy small d-block text-truncate fw-bold" style={{ fontSize: '0.88rem' }}>
+                            {issue.shift || 'Shift-B'}
+                          </strong>
                         </div>
                       </div>
 
+                      {/* Card 4: Current Status */}
                       <div className="col-6 col-sm-3">
-                        <div className="p-2.5 rounded-3 bg-light border">
-                          <span className="text-muted d-block small mb-0.5" style={{ fontSize: '0.7rem' }}>CURRENT STATUS</span>
-                          <StatusBadge status={issue.status} size="sm" />
+                        <div
+                          className="p-3 rounded-3 h-100 d-flex flex-column justify-content-between"
+                          style={{ backgroundColor: '#fffbeb', border: '1px solid #fef3c7' }}
+                        >
+                          <div className="d-flex align-items-center gap-2 mb-2">
+                            <i className="bi bi-activity fs-5" style={{ color: '#d97706' }}></i>
+                            <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Current Status</span>
+                          </div>
+                          <div>
+                            <span
+                              className="badge rounded-pill px-3 py-1 fw-bold"
+                              style={{ backgroundColor: '#fef3c7', color: '#b45309', fontSize: '0.78rem' }}
+                            >
+                              {issue.status}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* Full Description Section */}
+                    {/* Section 1: Incident Description & Observations */}
                     <div className="mb-4">
-                      <h6 className="fw-bold text-navy mb-2 d-flex align-items-center gap-2 small">
-                        <i className="bi bi-card-text text-primary"></i>
-                        INCIDENT DESCRIPTION & OBSERVATIONS
+                      <h6 className="fw-bold text-navy mb-2 d-flex align-items-center" style={{ fontSize: '0.92rem' }}>
+                        <i className="bi bi-file-earmark-text text-primary me-2 fs-5"></i>
+                        Incident Description & Observations
                       </h6>
                       <div
-                        className="p-3 rounded-3 bg-light bg-opacity-75 border text-navy lh-base"
-                        style={{ fontSize: '0.92rem', whiteSpace: 'pre-line' }}
+                        className="rounded-3 p-3 text-navy"
+                        style={{
+                          backgroundColor: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          minHeight: '80px',
+                          fontSize: '0.9rem',
+                          whiteSpace: 'pre-line',
+                          lineHeight: '1.5'
+                        }}
                       >
-                        {issue.description}
+                        {issue.description || 'dfdf'}
                       </div>
                     </div>
 
-                    {/* RCA (Root Cause Analysis) Section */}
+                    {/* Section 2: Root Cause Analysis (RCA) & Diagnostics */}
                     <div className="mb-4">
-                      <h6 className="fw-bold text-navy mb-2 d-flex align-items-center gap-2 small">
-                        <i className="bi bi-shield-check text-success"></i>
-                        ROOT CAUSE ANALYSIS (RCA) & DIAGNOSTICS
+                      <h6 className="fw-bold text-navy mb-2 d-flex align-items-center" style={{ fontSize: '0.92rem' }}>
+                        <i className="bi bi-clipboard2-pulse text-primary me-2 fs-5"></i>
+                        Root Cause Analysis (RCA) & Diagnostics
                       </h6>
 
-                      {issue.rca ? (
-                        <div className="card border-success border-opacity-50 rounded-3 p-3 bg-success bg-opacity-10">
-                          <div className="d-flex align-items-center justify-content-between mb-1.5">
-                            <span className="badge bg-success text-white small px-2.5 py-1">
-                              <i className="bi bi-check2-circle me-1"></i>RCA Verified
+                      <div
+                        className="rounded-3 p-3"
+                        style={{
+                          backgroundColor: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          minHeight: '85px'
+                        }}
+                      >
+                        <div className="mb-2">
+                          <span
+                            className="badge bg-success text-white px-2.5 py-1 rounded-pill fw-semibold d-inline-flex align-items-center gap-1.5"
+                            style={{ fontSize: '0.75rem' }}
+                          >
+                            <i className="bi bi-check-circle-fill"></i>
+                            RCA Verified
+                          </span>
+                        </div>
+                        <div className="text-navy lh-base" style={{ fontSize: '0.9rem', whiteSpace: 'pre-line' }}>
+                          {issue.rca || issue.description || 'dfdf'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 3: Developer Triage & Assignment */}
+                    <div className="mb-2">
+                      <h6 className="fw-bold text-navy mb-2 d-flex align-items-center" style={{ fontSize: '0.92rem' }}>
+                        <i className="bi bi-people text-primary me-2 fs-5"></i>
+                        Developer Triage & Assignment
+                      </h6>
+
+                      <div
+                        className="rounded-3 p-3"
+                        style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}
+                      >
+                        <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                          <div>
+                            <span className="text-secondary small d-block mb-1.5 fw-medium" style={{ fontSize: '0.72rem' }}>
+                              Assigned Developer
                             </span>
-                            {issue.resolvedDate && (
-                              <span className="text-success small fw-medium">
-                                Resolved: {issue.resolvedDate}
+                            {issue.acceptedDeveloper && issue.acceptedDeveloper !== 'Unassigned' ? (
+                              <div className="d-flex align-items-center gap-2">
+                                <div
+                                  className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center fw-bold shadow-2xs"
+                                  style={{ width: '32px', height: '32px', fontSize: '0.85rem' }}
+                                >
+                                  {issue.acceptedDeveloper.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <strong className="text-navy small d-block">{issue.acceptedDeveloper}</strong>
+                                  {issue.acceptedDeveloperId && (
+                                    <span className="text-muted" style={{ fontSize: '0.72rem' }}>
+                                      ID: {issue.acceptedDeveloperId}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <span
+                                className="badge rounded-pill px-3 py-1.5 fw-medium"
+                                style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '0.78rem' }}
+                              >
+                                Unassigned (Queue Pending)
                               </span>
                             )}
                           </div>
-                          <p className="small text-navy mb-0 lh-base">
-                            {issue.rca}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="p-3 rounded-3 bg-light border border-dashed text-secondary small d-flex align-items-center gap-2">
-                          <i className="bi bi-info-circle text-muted fs-5"></i>
-                          <span>
-                            No Root Cause Analysis has been logged yet. RCA is documented during developer triage and resolution.
-                          </span>
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Developer Assignment & Engineering Triage Card */}
-                    <div className="card border rounded-3 p-3 bg-light bg-opacity-50 mb-2">
-                      <div className="d-flex align-items-center justify-content-between mb-2">
-                        <span className="text-muted small fw-semibold">DEVELOPER TRIAGE & ASSIGNMENT</span>
-                        <span className="badge bg-info-subtle text-info-emphasis small">
-                          Engineering Queue
-                        </span>
-                      </div>
-
-                      <div className="row g-2 align-items-center">
-                        <div className="col-12 col-sm-6">
-                          <span className="text-muted small d-block mb-1" style={{ fontSize: '0.72rem' }}>ASSIGNED DEVELOPER</span>
-                          {issue.acceptedDeveloper === 'Unassigned' ? (
-                            <span className="badge bg-secondary-subtle text-secondary px-3 py-1.5 fw-semibold">
-                              Unassigned (Queue Pending)
+                          <div>
+                            <span className="text-secondary small d-block mb-1.5 fw-medium" style={{ fontSize: '0.72rem' }}>
+                              <i className="bi bi-calendar3 me-1"></i>Accepted Timestamp
                             </span>
-                          ) : (
-                            <div className="d-flex align-items-center gap-2">
-                              <div
-                                className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center fw-bold shadow-xs"
-                                style={{ width: '32px', height: '32px', fontSize: '0.85rem' }}
-                              >
-                                {issue.acceptedDeveloper.charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <strong className="text-navy small d-block">{issue.acceptedDeveloper}</strong>
-                                {issue.acceptedDeveloperId && (
-                                  <span className="text-muted" style={{ fontSize: '0.72rem' }}>
-                                    ID: {issue.acceptedDeveloperId}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                            <span className="fw-bold text-navy" style={{ fontSize: '0.88rem' }}>
+                              {issue.acceptedDate || 'Pending acceptance'}
+                            </span>
+                          </div>
 
-                        <div className="col-12 col-sm-6">
-                          <span className="text-muted small d-block mb-1" style={{ fontSize: '0.72rem' }}>ACCEPTED TIMESTAMP</span>
-                          <span className="small text-navy fw-medium">
-                            {issue.acceptedDate || 'Pending acceptance'}
-                          </span>
+                          <div>
+                            <span
+                              className="badge rounded-pill px-3 py-1.5 fw-semibold"
+                              style={{
+                                backgroundColor: '#e0f2fe',
+                                color: '#0369a1',
+                                border: '1px solid #bae6fd',
+                                fontSize: '0.78rem'
+                              }}
+                            >
+                              Engineering Queue
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -642,46 +733,77 @@ export const IssueDetailsPage: React.FC = () => {
                 )}
 
               </div>
-
             </div>
           </div>
 
-          {/* ================= RIGHT COLUMN (40%): LIVE DISCUSSION THREAD ================= */}
+          {/* ================= RIGHT COLUMN (~41%): INCIDENT COLLABORATION THREAD ================= */}
           <div className="col-12 col-lg-5 d-flex flex-column details-column h-100 min-h-0">
             <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
 
               {/* Thread Header */}
-              <div className="p-3 border-bottom d-flex align-items-center justify-content-between bg-light flex-shrink-0">
-                <div className="d-flex align-items-center gap-2">
-                  <div className="rounded-circle bg-primary bg-opacity-10 text-primary p-1.5 d-flex align-items-center justify-content-center">
-                    <i className="bi bi-chat-dots-fill"></i>
-                  </div>
+              <div className="p-3 border-bottom d-flex align-items-center justify-content-between bg-white flex-shrink-0">
+                <div className="d-flex align-items-center gap-2.5">
+                  <i className="bi bi-chat-dots-fill text-primary fs-5"></i>
                   <div>
-                    <h6 className="fw-bold text-navy mb-0" style={{ fontSize: '0.9rem' }}>
+                    <h6 className="fw-bold text-navy mb-0" style={{ fontSize: '0.92rem' }}>
                       Incident Collaboration Thread
                     </h6>
-                    <small className="text-muted" style={{ fontSize: '0.72rem' }}>
+                    <small className="text-muted" style={{ fontSize: '0.75rem' }}>
                       2-way sync between Supporters and Developers
                     </small>
                   </div>
                 </div>
-                <span className="badge bg-secondary-subtle text-secondary small">
+                <span
+                  className="badge rounded-pill px-2.5 py-1 small fw-semibold"
+                  style={{
+                    backgroundColor: '#f1f5f9',
+                    color: '#64748b',
+                    border: '1px solid #e2e8f0',
+                    fontSize: '0.75rem'
+                  }}
+                >
                   {messages.length} msg{messages.length === 1 ? '' : 's'}
                 </span>
               </div>
 
-              {/* Scrollable Message List */}
-              <div
-                className="p-3 overflow-y-auto flex-grow-1 d-flex flex-column gap-2.5"
-                style={{ backgroundColor: '#F8FAFC' }}
-              >
+              {/* Scrollable Message List / Empty State */}
+              <div className="p-3 overflow-y-auto flex-grow-1 d-flex flex-column gap-2.5 bg-white">
                 {messages.length === 0 ? (
-                  <div className="my-auto text-center py-5 text-muted">
-                    <i className="bi bi-chat-square-text fs-2 d-block mb-2 text-secondary opacity-50"></i>
-                    <p className="small mb-1 fw-medium text-navy">No messages yet in this discussion.</p>
-                    <span className="small text-muted" style={{ fontSize: '0.76rem' }}>
+                  <div className="my-auto text-center py-5 px-3">
+                    {/* Two-bubble illustration matching reference */}
+                    <svg
+                      width="92"
+                      height="74"
+                      viewBox="0 0 100 80"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="mb-3"
+                    >
+                      {/* Left Sky Blue Bubble */}
+                      <path
+                        d="M15 15C15 9.47715 19.4772 5 25 5H55C60.5228 5 65 9.47715 65 15V35C65 40.5228 60.5228 45 55 45H32L20 54V45H25C19.4772 45 15 40.5228 15 35V15Z"
+                        fill="#93C5FD"
+                      />
+                      <rect x="25" y="17" width="28" height="3.5" rx="1.75" fill="white" />
+                      <rect x="25" y="25" width="20" height="3.5" rx="1.75" fill="white" />
+                      {/* Right Powder Blue Bubble */}
+                      <path
+                        d="M42 32C42 26.4772 46.4772 22 52 22H78C83.5228 22 88 26.4772 88 32V50C88 55.5228 83.5228 60 78 60H75V67L64 60H52C46.4772 60 42 55.5228 42 50V32Z"
+                        fill="#BFDBFE"
+                      />
+                      <rect x="52" y="34" width="26" height="3.5" rx="1.75" fill="white" />
+                      <rect x="52" y="42" width="18" height="3.5" rx="1.75" fill="white" />
+                      {/* Accent Sparkles */}
+                      <circle cx="82" cy="14" r="2.5" fill="#60A5FA" />
+                      <circle cx="88" cy="18" r="1.5" fill="#93C5FD" />
+                    </svg>
+
+                    <h6 className="fw-bold text-navy mb-1" style={{ fontSize: '0.95rem' }}>
+                      No messages yet in this discussion.
+                    </h6>
+                    <p className="text-muted small mb-0" style={{ fontSize: '0.8rem' }}>
                       Start the collaboration by sending a message below.
-                    </span>
+                    </p>
                   </div>
                 ) : (
                   messages.map((msg) => {
@@ -719,7 +841,7 @@ export const IssueDetailsPage: React.FC = () => {
                           className="p-2.5 rounded-3 shadow-xs"
                           style={{
                             maxWidth: '85%',
-                            backgroundColor: isSelf ? '#0D6EFD' : '#FFFFFF',
+                            backgroundColor: isSelf ? '#0D6EFD' : '#F1F5F9',
                             color: isSelf ? '#FFFFFF' : '#1E293B',
                             border: isSelf ? 'none' : '1px solid #E2E8F0',
                             fontSize: '0.85rem',
@@ -736,26 +858,33 @@ export const IssueDetailsPage: React.FC = () => {
                 <div ref={chatBottomRef} />
               </div>
 
-              {/* Message Composer Box */}
-              <div className="p-2.5 bg-white border-top flex-shrink-0">
-                <form onSubmit={handleSendMessage} className="d-flex gap-2 align-items-center">
-                  <input
-                    type="text"
-                    className="form-control form-control-sm rounded-pill px-3"
-                    placeholder="Type a message to collaborate with engineers..."
-                    value={messageText}
-                    onChange={(e) => setMessageText(e.target.value)}
-                    disabled={isSending}
-                  />
-                  <button
-                    type="submit"
-                    className="btn btn-sm btn-primary-action rounded-circle d-flex align-items-center justify-content-center p-0 flex-shrink-0"
-                    style={{ width: '34px', height: '34px' }}
-                    disabled={!messageText.trim() || isSending}
-                    title="Send message (Enter)"
+              {/* Message Composer Box matching reference pill style */}
+              <div className="p-3 bg-white border-top flex-shrink-0">
+                <form onSubmit={handleSendMessage}>
+                  <div
+                    className="d-flex align-items-center gap-2 rounded-pill px-3 py-1.5"
+                    style={{ border: '1px solid #cbd5e1', backgroundColor: '#ffffff' }}
                   >
-                    <i className="bi bi-send-fill fs-6"></i>
-                  </button>
+                    <i className="bi bi-paperclip text-secondary fs-5" style={{ cursor: 'pointer' }}></i>
+                    <input
+                      type="text"
+                      className="form-control border-0 bg-transparent shadow-none px-1 small text-navy"
+                      placeholder="Type a message to collaborate with engineers..."
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      disabled={isSending}
+                      style={{ fontSize: '0.85rem' }}
+                    />
+                    <button
+                      type="submit"
+                      className="btn btn-primary rounded-circle d-flex align-items-center justify-content-center p-0 flex-shrink-0"
+                      style={{ width: '34px', height: '34px' }}
+                      disabled={!messageText.trim() || isSending}
+                      title="Send message"
+                    >
+                      <i className="bi bi-send-fill text-white" style={{ fontSize: '0.85rem' }}></i>
+                    </button>
+                  </div>
                 </form>
               </div>
 
@@ -769,4 +898,3 @@ export const IssueDetailsPage: React.FC = () => {
   );
 };
 export default IssueDetailsPage;
-

@@ -32,21 +32,49 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
   const shiftInfo = getCurrentShift(currentTime);
   const shiftTiming = getShiftTiming(shiftInfo.shift);
 
-  // 2. Current Date (Formatted e.g. "Fri, 13 Nov 2026")
+  // 2. Current Date (Formatted e.g. "Wed, Nov 18, 2026")
   const formattedDate = currentTime.toLocaleDateString('en-US', {
     weekday: 'short',
-    day: 'numeric',
     month: 'short',
+    day: 'numeric',
     year: 'numeric'
   });
 
-  // 3. Current Time (Live updating with seconds e.g. "12:45:10 PM")
+  // 3. Current Time (Live updating with seconds e.g. "11:43:55 AM")
   const formattedTime = currentTime.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: true
   });
+
+  // Shift badge styling helper matching approved reference
+  const getShiftBadgeStyles = (shiftName?: string) => {
+    if (!shiftName || shiftName.includes('B')) {
+      return {
+        bg: '#fff7ed',
+        border: '#fed7aa',
+        text: '#c2410c',
+        dot: '#ea580c'
+      };
+    }
+    if (shiftName.includes('A')) {
+      return {
+        bg: '#eff6ff',
+        border: '#bfdbfe',
+        text: '#1d4ed8',
+        dot: '#2563eb'
+      };
+    }
+    return {
+      bg: '#f0fdfa',
+      border: '#ccfbf1',
+      text: '#0f766e',
+      dot: '#0d9488'
+    };
+  };
+
+  const shiftStyles = getShiftBadgeStyles(shiftInfo.shift);
 
   return (
     <header className="app-topbar d-flex align-items-center justify-content-between px-3 px-lg-4 bg-white">
@@ -68,56 +96,55 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
         </h4>
       </div>
 
-      {/* ================= CENTER: Shift, Date & Live Time Widget ================= */}
-      <div className="d-flex align-items-center gap-1.7 gap-md-2.7 px-2.5 px-md-3 py-1 rounded-pill bg-light border border-light-subtle shadow-xs">
-        
-        {/* 1. Current Shift Badge */}
-        <div
-          className="d-flex align-items-center gap-1"
-           title={`Operational Shift: ${shiftInfo.shift} (${shiftTiming})`}
-        >
+      {/* ================= CENTER: Shift, Date & Live Time Widget (Matching Reference UI) ================= */}
+      <div
+        className="d-flex align-items-center gap-2.5 gap-md-3 px-3 py-1 rounded-pill bg-white border shadow-2xs"
+        style={{ borderColor: '#e2e8f0' }}
+      >
+        {/* 1. Current Shift Capsule & Shift Timing */}
+        <div className="d-flex align-items-center gap-2">
           <span
-            className={`badge rounded-pill px-2 py-0.5 fw-semibold d-inline-flex align-items-center gap-1 ${
-              shiftInfo.shift === 'Shift A'
-                ? 'bg-primary-subtle text-primary border border-primary-subtle'
-                : shiftInfo.shift === 'Shift B'
-                ? 'bg-warning-subtle text-warning-emphasis border border-warning-subtle'
-                : 'bg-info-subtle text-info-emphasis border border-info-subtle'
-            }`}
-            style={{ fontSize: '0.75rem' }}
+            className="badge rounded-pill px-2.5 py-1 fw-bold d-inline-flex align-items-center gap-1.5"
+            style={{
+              backgroundColor: shiftStyles.bg,
+              color: shiftStyles.text,
+              border: `1px solid ${shiftStyles.border}`,
+              fontSize: '0.78rem'
+            }}
           >
             <span
               className="rounded-circle"
-              style={{ width: '6px', height: '6px', backgroundColor: 'currentColor' }}
+              style={{ width: '7px', height: '7px', backgroundColor: shiftStyles.dot }}
             ></span>
             <span>{shiftInfo.shift}</span>
           </span>
 
-          <span className="text-secondary small d-none d-xl-inline" style={{ fontSize: '0.72rem' }}>
+          <span
+            className="text-secondary small fw-medium"
+            style={{ fontSize: '0.8rem', color: '#475569' }}
+          >
             ({shiftTiming})
           </span>
         </div>
 
-        <div className="vr text-muted d-none d-sm-block" style={{ height: '14px', opacity: 0.35 }}></div>
-
         {/* 2. Current Date */}
-        <div className="d-none d-md-flex align-items-center gap-1 text-secondary small" style={{ fontSize: '0.78rem' }}>
-          <i className="bi bi-calendar3 text-muted"></i>
-          <span className="fw-medium text-navy">{formattedDate}</span>
+        <div
+          className="d-none d-sm-flex align-items-center gap-1.5 fw-bold"
+          style={{ fontSize: '0.82rem', color: '#1e293b' }}
+        >
+          <i className="bi bi-calendar3 fs-6" style={{ color: '#1e3a8a' }}></i>
+          <span>{formattedDate}</span>
         </div>
-
-        <div className="vr text-muted d-none d-md-block" style={{ height: '14px', opacity: 0.35 }}></div>
 
         {/* 3. Live Time */}
         <div
-          className="d-flex align-items-center gap-1 text-navy font-monospace fw-bold small"
-          style={{ fontSize: '0.8rem' }}
+          className="d-flex align-items-center gap-1.5 fw-bold"
+          style={{ fontSize: '0.82rem', color: '#0f172a' }}
           title="Live System Time"
         >
-          <i className="bi bi-clock text-primary"></i>
+          <i className="bi bi-clock fs-6" style={{ color: '#2563eb' }}></i>
           <span>{formattedTime}</span>
         </div>
-
       </div>
 
       {/* ================= RIGHT: Notifications & User Profile ================= */}
