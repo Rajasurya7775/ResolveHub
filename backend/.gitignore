@@ -31,3 +31,18 @@ __pycache__/
 .pytest_cache/
 .vscode/
 >>>>>>> origin/backend-1
+
+# Generated weekly reports
+test_ai_weekly_report.html
+test_ai_weekly_report.pdf
+test_weekly_report.pdf
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# Environment variables
+.env

@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter
 from app.api.v1.endpoints import dashboard_ws
+from app.api.v1.endpoints import developer_weekly_summary
 
 from app.api.v1.endpoints import (
     auth,
@@ -9,6 +10,8 @@ from app.api.v1.endpoints import (
     my_issues,
     issues,
     dashboard_ws,
+    developer_weekly_summary,
+
 )
 
 api_router = APIRouter()
@@ -19,3 +22,4 @@ api_router.include_router(previous_issues.router)
 api_router.include_router(my_issues.router)
 api_router.include_router(issues.router)
 api_router.include_router(dashboard_ws.router)
+api_router.include_router(developer_weekly_summary.router)

@@ -4,18 +4,24 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 import logging
-
+from datetime import timezone
 from app.api.deps import get_current_user
 from app.core.enums import Role, AccountStatus
 from app.core.websocket_manager import manager
 from app.db.session import get_db
-from app.models import Issue, Project, User
 from app.schemas.issue import (
     IssueCreate,
     IssueUpdate,
     IssueResponse,
     ProjectDropdownResponse,
     DeveloperDropdownResponse,
+)
+from app.models import (
+    Issue,
+    Project,
+    User,
+    IssueAssignmentHistory,
+    IssueStatusHistory,
 )
 from app.services.issue_service import update_issue as update_issue_service
 
@@ -122,9 +128,37 @@ async def create_issue(
         )
 
         # Set assigned timestamp equal to creation timestamp
+        # Set assigned timestamp equal to creation timestamp
         new_issue.assigned_at = new_issue.issue_created_at
 
-        # Save both timestamps
+        created_at = new_issue.issue_created_at
+
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
+        # Record initial status history
+        db.add(
+            IssueStatusHistory(
+                issue_id=new_issue.issue_id,
+                previous_status=None,
+                new_status="OPEN",
+                changed_by_user_id=current_user.user_id,
+                changed_at=created_at,
+            )
+        )
+
+        # Record initial assignment history
+        if new_issue.assigned_to is not None:
+            db.add(
+                IssueAssignmentHistory(
+                    issue_id=new_issue.issue_id,
+                    previous_developer_id=None,
+                    new_developer_id=new_issue.assigned_to,
+                    changed_by_user_id=current_user.user_id,
+                    changed_at=created_at,
+                )
+        )
+
         db.commit()
         db.refresh(new_issue)
 
@@ -159,40 +193,17 @@ async def update_issue_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    issue = db.get(Issue, issue_id)
+    updated_issue = update_issue_service(
+        db=db,
+        current_user=current_user,
+        issue_id=issue_id,
+        update_data=issue_data.model_dump(exclude_unset=True),
+    )
 
-    if issue is None or issue.deleted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Issue not found.",
-        )
-
-    update_data = issue_data.model_dump(exclude_unset=True)
-
-    if not update_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No fields provided for update.",
-        )
-
-    try:
-        updated_issue = update_issue_service(
-            db=db,
-            issue=issue,
-            update_data=update_data,
-        )
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-
-    # Broadcast only after successful database update
     await manager.broadcast({
-        "event": "dashboard_updated",
-        "action": "issue_updated",
-        "issue_number": updated_issue.issue_number,
+    "event": "dashboard_updated",
+    "action": "issue_created",
+    "issue_number": new_issue.issue_number,
     })
 
-    return updated_issue
+    return new_issue

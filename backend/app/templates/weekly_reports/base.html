@@ -1,0 +1,693 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ design.title }}</title>
+
+    <style>
+        @page {
+            size: A4;
+            margin: 13mm 14mm 15mm 14mm;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            color: #333333;
+            background: #ffffff;
+            font-size: 10px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        body {
+            width: 100%;
+        }
+
+        /* HEADER */
+
+        .hero {
+            width: 100%;
+            padding: 23px 25px;
+            margin: 0 0 22px 0;
+            background: #f3f4f6;
+            border-bottom: 4px solid {{ design.theme.accent_color }};
+            border-radius: 3px;
+            page-break-inside: avoid;
+        }
+
+        .brand {
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: {{ design.theme.primary_color }};
+        }
+
+        h1 {
+            font-size: 25px;
+            line-height: 1.25;
+            margin: 15px 0 6px;
+            color: {{ design.theme.primary_color }};
+        }
+
+        .subtitle {
+            font-size: 11px;
+            color: #666666;
+            margin-bottom: 17px;
+        }
+
+        .meta-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 25px;
+            padding-top: 12px;
+            border-top: 1px solid #dddddd;
+        }
+
+        .meta-item {
+            min-width: 40%;
+            line-height: 1.6;
+        }
+
+        .meta-label {
+            color: #777777;
+            font-size: 9px;
+        }
+
+        .meta-value {
+            font-weight: bold;
+            color: #333333;
+        }
+
+        /* SECTIONS */
+
+        .section {
+            margin: 0 0 21px 0;
+            width: 100%;
+        }
+
+        h2 {
+            font-size: 15px;
+            margin: 0 0 12px;
+            padding: 2px 0 2px 10px;
+            border-left: 4px solid {{ design.theme.accent_color }};
+            color: {{ design.theme.primary_color }};
+            line-height: 1.3;
+        }
+
+        h3 {
+            font-size: 11px;
+            margin: 12px 0 8px;
+        }
+
+        .muted {
+            color: #777777;
+        }
+
+        /* EXECUTIVE OVERVIEW */
+
+        .overview {
+            padding: 13px 15px;
+            background: #f7f8fa;
+            border: 1px solid #e3e5e8;
+            border-radius: 4px;
+            line-height: 1.7;
+            font-size: 10px;
+        }
+
+        /* KPI CARDS */
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .metric-card {
+            min-height: 75px;
+            padding: 12px;
+            background: #f7f8fa;
+            border: 1px solid #e0e2e5;
+            border-left: 4px solid {{ design.theme.accent_color }};
+            border-radius: 3px;
+            page-break-inside: avoid;
+        }
+
+        .metric-label {
+            color: #666666;
+            font-size: 9px;
+            line-height: 1.4;
+        }
+
+        .metric-value {
+            margin-top: 8px;
+            font-size: 23px;
+            font-weight: bold;
+            color: {{ design.theme.primary_color }};
+        }
+
+        /* HORIZONTAL CHARTS */
+
+        .chart-container {
+            padding: 12px 15px;
+            background: #ffffff;
+            border: 1px solid #e5e5e5;
+            border-radius: 4px;
+        }
+
+        .chart-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+            page-break-inside: avoid;
+        }
+
+        .chart-name {
+            width: 95px;
+            flex-shrink: 0;
+            font-size: 9px;
+            font-weight: bold;
+            color: #555555;
+            overflow-wrap: anywhere;
+        }
+
+        .chart-track {
+            flex: 1;
+            height: 13px;
+            background: #eeeeee;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .chart-bar {
+            height: 100%;
+            min-width: 0;
+            border-radius: 3px;
+        }
+
+        .chart-count {
+            width: 25px;
+            text-align: right;
+            font-weight: bold;
+            font-size: 10px;
+        }
+
+        .empty-chart {
+            color: #888888;
+            padding: 12px 0;
+            text-align: center;
+        }
+
+        /* ISSUE TABLE */
+
+        .table-wrapper {
+            width: 100%;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 9px;
+            table-layout: fixed;
+        }
+
+        thead {
+            display: table-header-group;
+        }
+
+        tr {
+            page-break-inside: avoid;
+        }
+
+        th {
+            background: {{ design.theme.background_color }};
+            color: {{ design.theme.primary_color }};
+            font-weight: bold;
+            text-align: left;
+            padding: 10px 7px;
+            border: 1px solid #dddddd;
+        }
+
+        td {
+            padding: 10px 7px;
+            border: 1px solid #e0e0e0;
+            vertical-align: top;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #f7f8fa;
+        }
+
+        .issue-id {
+            font-weight: bold;
+            color: #333333;
+        }
+
+        .priority {
+            display: inline-block;
+            padding: 4px 7px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 8px;
+            background: #eeeeee;
+            color: #333333;
+        }
+
+        .priority-critical,
+        .priority-high {
+            background: #fde8e7;
+            color: #b42318;
+        }
+
+        .priority-medium {
+            background: #fff2d8;
+            color: #9a6700;
+        }
+
+        .priority-low {
+            background: #e5f4ed;
+            color: #137547;
+        }
+
+        .status {
+            font-weight: bold;
+            color: #555555;
+        }
+
+        /* RISK ANALYSIS */
+
+        .risk {
+            padding: 15px;
+            background: #f7f8fa;
+            border: 1px solid #e1e3e6;
+            border-left: 5px solid {{ design.theme.accent_color }};
+            border-radius: 3px;
+            page-break-inside: avoid;
+        }
+
+        .risk-label {
+            font-size: 9px;
+            color: #777777;
+            margin-bottom: 5px;
+        }
+
+        .risk-value {
+            font-size: 19px;
+            font-weight: bold;
+            color: {{ design.theme.primary_color }};
+        }
+
+        .risk-description {
+            margin-top: 10px;
+            line-height: 1.7;
+            color: #555555;
+            font-weight: normal;
+        }
+
+        /* OBSERVATIONS AND RECOMMENDATIONS */
+
+        .bullet-list {
+            padding: 0;
+            margin: 0;
+        }
+
+        .bullet {
+            display: flex;
+            gap: 9px;
+            padding: 9px 11px;
+            margin-bottom: 7px;
+            background: #f8f9fa;
+            border: 1px solid #eeeeee;
+            border-radius: 3px;
+            line-height: 1.6;
+            page-break-inside: avoid;
+        }
+
+        .bullet-marker {
+            color: {{ design.theme.accent_color }};
+            font-weight: bold;
+        }
+
+        /* EMPTY DATA */
+
+        .empty-state {
+            padding: 15px;
+            text-align: center;
+            color: #888888;
+            background: #f7f8fa;
+            border: 1px dashed #dddddd;
+        }
+
+        /* FOOTER */
+
+        .footer {
+            margin-top: 25px;
+            padding-top: 10px;
+            border-top: 1px solid #dddddd;
+            color: #888888;
+            font-size: 8px;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        @media print {
+            .section,
+            .metric-card,
+            .risk,
+            .chart-container {
+                break-inside: avoid;
+            }
+
+            thead {
+                display: table-header-group;
+            }
+
+            tr {
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+{% for section in design.sections %}
+
+    {% if section.type == "hero" %}
+
+    <section class="hero">
+        <div class="brand">RESOLVEHUB</div>
+
+        <h1>{{ design.title }}</h1>
+
+        <div class="subtitle">
+            {{ design.subtitle }}
+        </div>
+
+        <div class="meta-grid">
+
+            <div class="meta-item">
+                <div class="meta-label">Developer</div>
+                <div class="meta-value">
+                    {{ developer.full_name or "N/A" }}
+                </div>
+            </div>
+
+            <div class="meta-item">
+                <div class="meta-label">Employee ID</div>
+                <div class="meta-value">
+                    {{ developer.employee_id or "N/A" }}
+                </div>
+            </div>
+
+            <div class="meta-item">
+                <div class="meta-label">Reporting Period</div>
+                <div class="meta-value">
+                    {{ week.start or week.week_start }}
+                    — {{ week.end or week.week_end }}
+                </div>
+            </div>
+
+            <div class="meta-item">
+                <div class="meta-label">Generated At</div>
+                <div class="meta-value">
+                    {{ generated_at }}
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    {% elif section.type == "executive_overview" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Executive Overview" }}</h2>
+
+        <div class="overview">
+            {{ ai_summary.overview or "Weekly report overview is unavailable." }}
+        </div>
+    </section>
+
+    {% elif section.type == "metric_cards" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Weekly Performance Metrics" }}</h2>
+
+        <div class="metric-grid">
+
+            {% for metric in metrics %}
+            <div class="metric-card">
+                <div class="metric-label">
+                    {{ metric.label }}
+                </div>
+
+                <div class="metric-value">
+                    {{ metric.value }}
+                </div>
+            </div>
+            {% endfor %}
+
+        </div>
+    </section>
+
+    {% elif section.type == "priority_chart" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Issue Priority Distribution" }}</h2>
+
+        <div class="chart-container">
+
+            {% if priority_chart %}
+
+                {% for item in priority_chart %}
+                <div class="chart-item">
+
+                    <div class="chart-name">
+                        {{ item.label }}
+                    </div>
+
+                    <div class="chart-track">
+                        <div class="chart-bar"
+                             style="width: {{ item.percentage }}%;
+                                    background: {{ item.color }};">
+                        </div>
+                    </div>
+
+                    <div class="chart-count">
+                        {{ item.value }}
+                    </div>
+
+                </div>
+                {% endfor %}
+
+            {% else %}
+                <div class="empty-chart">
+                    No priority data available.
+                </div>
+            {% endif %}
+
+        </div>
+    </section>
+
+    {% elif section.type == "status_chart" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Issue Status Distribution" }}</h2>
+
+        <div class="chart-container">
+
+            {% if status_chart %}
+
+                {% for item in status_chart %}
+                <div class="chart-item">
+
+                    <div class="chart-name">
+                        {{ item.label }}
+                    </div>
+
+                    <div class="chart-track">
+                        <div class="chart-bar"
+                             style="width: {{ item.percentage }}%;
+                                    background: {{ item.color }};">
+                        </div>
+                    </div>
+
+                    <div class="chart-count">
+                        {{ item.value }}
+                    </div>
+
+                </div>
+                {% endfor %}
+
+            {% else %}
+                <div class="empty-chart">
+                    No status data available.
+                </div>
+            {% endif %}
+
+        </div>
+    </section>
+
+    {% elif section.type == "issue_table" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Issue Details" }}</h2>
+
+        {% if issue_rows %}
+
+        <div class="table-wrapper">
+            <table>
+                <colgroup>
+                    <col style="width: 16%;">
+                    <col style="width: 30%;">
+                    <col style="width: 23%;">
+                    <col style="width: 16%;">
+                    <col style="width: 15%;">
+                </colgroup>
+
+                <thead>
+                    <tr>
+                        <th>Issue ID</th>
+                        <th>Issue Title</th>
+                        <th>Project</th>
+                        <th>Status</th>
+                        <th>Priority</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for issue in issue_rows %}
+                    <tr>
+                        <td class="issue-id">
+                            {{ issue.issue_number or issue.issue_id }}
+                        </td>
+
+                        <td>
+                            {{ issue.issue_title or "Untitled" }}
+                        </td>
+
+                        <td>
+                            {{ issue.project_name or "N/A" }}
+                        </td>
+
+                        <td class="status">
+                            {{ issue.issue_status or "N/A" }}
+                        </td>
+
+                        <td>
+                            {% set priority = (issue.issue_priority or "N/A")|upper %}
+
+                            <span class="priority
+                                {% if priority == 'CRITICAL' %}
+                                    priority-critical
+                                {% elif priority == 'HIGH' %}
+                                    priority-high
+                                {% elif priority == 'MEDIUM' %}
+                                    priority-medium
+                                {% elif priority == 'LOW' %}
+                                    priority-low
+                                {% endif %}
+                            ">
+                                {{ priority }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% else %}
+            <div class="empty-state">
+                No issues available for this reporting period.
+            </div>
+        {% endif %}
+    </section>
+
+    {% elif section.type == "risk_analysis" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Risk Assessment" }}</h2>
+
+        <div class="risk">
+
+            <div class="risk-label">
+                OVERALL RISK LEVEL
+            </div>
+
+            <div class="risk-value">
+                {{ risk_level }}
+            </div>
+
+            <div class="risk-description">
+                {{ risk_explanation }}
+            </div>
+
+        </div>
+    </section>
+
+    {% elif section.type == "observations" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Key Observations" }}</h2>
+
+        <div class="bullet-list">
+
+            {% for item in ai_summary.key_observations or [] %}
+            <div class="bullet">
+                <span class="bullet-marker">●</span>
+                <span>{{ item }}</span>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                No observations available.
+            </div>
+            {% endfor %}
+
+        </div>
+    </section>
+
+    {% elif section.type == "recommendations" %}
+
+    <section class="section">
+        <h2>{{ section.title or "Recommended Actions" }}</h2>
+
+        <div class="bullet-list">
+
+            {% for item in ai_summary.recommendations or [] %}
+            <div class="bullet">
+                <span class="bullet-marker">●</span>
+                <span>{{ item }}</span>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                No recommendations available.
+            </div>
+            {% endfor %}
+
+        </div>
+    </section>
+
+    {% endif %}
+
+{% endfor %}
+
+<div class="footer">
+    <strong>RESOLVEHUB</strong>
+    <br>
+    AI-Generated Developer Weekly Report
+    | Weekly metrics calculated by the application
+</div>
+
+</body>
+</html>

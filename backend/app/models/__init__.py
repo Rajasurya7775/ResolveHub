@@ -5,6 +5,9 @@ from app.models.project import Project
 from app.models.time_log import TimeLog
 from app.models.user import User
 
+from app.models.issue_assignment_history import IssueAssignmentHistory
+from app.models.issue_status_history import IssueStatusHistory
+
 __all__ = [
     "User",
     "Project",
@@ -12,4 +15,6 @@ __all__ = [
     "IssueMessage",
     "AuditLog",
     "TimeLog",
+    "IssueAssignmentHistory",
+    "IssueStatusHistory",
 ]
