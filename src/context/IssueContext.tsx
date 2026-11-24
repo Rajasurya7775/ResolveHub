@@ -323,7 +323,8 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const apiRes = await apiSendMessage(
         issueId,
         text.trim(),
-        currentUser?.employeeId || currentUser?.id
+        currentUser?.id || currentUser?.employeeId,
+        currentUser?.name
       );
 
       if (apiRes.success && apiRes.message) {

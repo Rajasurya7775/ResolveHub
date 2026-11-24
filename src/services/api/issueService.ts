@@ -1003,74 +1003,219 @@ export async function apiDeleteIssue(
 }
 
 /**
+ * Normalizes discussion message matching backend schema:
+ * { id, issue_id, sender_id, sender_name, markdown, created_at }
+ */
+export function normalizeDiscussionMessage(m: any, defaultIssueId: string): DiscussionMessage {
+  const text = m.markdown || m.message || m.text || '';
+  const senderName = m.sender_name || m.senderName || 'User';
+
+  // Determine role: Developer or Supporter
+  let role: 'Support' | 'Supporter' | 'Developer' = 'Supporter';
+  const rawRole = String(m.sender_role || m.role || m.senderRole || '').toLowerCase();
+  const lowerName = String(senderName).toLowerCase();
+  if (
+    rawRole.includes('dev') ||
+    lowerName.includes('jeva') ||
+    lowerName.includes('arun') ||
+    lowerName.includes('developer')
+  ) {
+    role = 'Developer';
+  } else if (
+    rawRole.includes('supp') ||
+    lowerName.includes('sivabalan') ||
+    lowerName.includes('supporter')
+  ) {
+    role = 'Supporter';
+  }
+
+  // Format timestamp: "Nov 17, 2026 • 04:20 PM" matching reference UI
+  let timestamp = '';
+  const dateVal = m.created_at || m.createdAt || m.timestamp;
+  if (dateVal) {
+    try {
+      const d = new Date(dateVal);
+      if (!isNaN(d.getTime())) {
+        const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        timestamp = `${datePart} • ${timePart}`;
+      } else {
+        timestamp = String(dateVal);
+      }
+    } catch {
+      timestamp = String(dateVal);
+    }
+  }
+  if (!timestamp) {
+    const d = new Date();
+    timestamp = `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} • ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
+  }
+
+  return {
+    id: String(m.id || `msg-${Date.now()}`),
+    issueId: String(m.issue_id || defaultIssueId),
+    senderId: String(m.sender_id || m.senderId || ''),
+    senderName,
+    senderRole: role,
+    message: text,
+    markdown: text,
+    createdAt: m.created_at || '',
+    timestamp,
+    attachment: m.attachment,
+    reaction: m.reaction
+  };
+}
+
+/**
  * Fetch discussion messages for an issue
  */
 export async function apiFetchMessages(issueId: string): Promise<DiscussionMessage[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}/messages/`, {
-      method: 'GET',
-      headers: getAuthHeaders()
-    });
+    const endpoints = [
+      `${API_BASE_URL}/my-issues/${issueId}/messages`,
+      `${API_BASE_URL}/issues/${issueId}/messages`,
+      `${API_BASE_URL}/previous-issues/${issueId}/messages`
+    ];
 
-    if (!response.ok) return [];
+    let response: Response | null = null;
+    for (const url of endpoints) {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: getAuthHeaders()
+      }).catch(() => null);
+
+      if (response && response.ok) break;
+    }
+
+    if (!response || !response.ok) return [];
 
     const json = await response.json();
     const list = Array.isArray(json) ? json : json.data || json.messages || [];
 
-    return list.map((m: any) => ({
-      id: String(m.id || `msg-${Date.now()}`),
-      issueId: String(m.isuue_id || m.issue_id || issueId),
-      senderId: String(m.sender_id || m.senderId || ''),
-      senderName: m.sender_name || m.senderName || 'User',
-      senderRole: m.sender_role || m.senderRole || 'Supporter',
-      message: m.message || '',
-      timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (m.timestamp || '')
-    }));
-  } catch {
+    return list.map((m: any) => normalizeDiscussionMessage(m, issueId));
+  } catch (error) {
+    console.error('[apiFetchMessages] Error fetching messages:', error);
     return [];
   }
 }
 
 /**
- * Send a discussion message
+ * Send a discussion message avoiding 422 Unprocessable Content
  */
 export async function apiSendMessage(
   issueId: string,
   message: string,
-  senderId?: string
+  senderId?: string,
+  senderName?: string
 ): Promise<{ success: boolean; message?: DiscussionMessage }> {
   try {
-    const payload = {
-      isuue_id: issueId,
-      issue_id: issueId,
-      message,
-      sender_id: senderId
+    // Resolve integer sender_id if available from user session
+    let numericSenderId: number | undefined;
+    if (senderId && !isNaN(Number(senderId))) {
+      numericSenderId = Number(senderId);
+    } else {
+      const authUserRaw = localStorage.getItem('resolvehub_auth_user');
+      if (authUserRaw) {
+        try {
+          const parsed = JSON.parse(authUserRaw);
+          if (parsed.user_id && !isNaN(Number(parsed.user_id))) {
+            numericSenderId = Number(parsed.user_id);
+          } else if (parsed.id && !isNaN(Number(parsed.id))) {
+            numericSenderId = Number(parsed.id);
+          }
+        } catch {}
+      }
+    }
+
+    // Endpoints to try
+    const endpoints = [
+      `${API_BASE_URL}/my-issues/${issueId}/messages`,
+      `${API_BASE_URL}/issues/${issueId}/messages`,
+      `${API_BASE_URL}/previous-issues/${issueId}/messages`
+    ];
+
+    // Payload variants to prevent 422 Unprocessable Content
+    // Variant 1: Complete payload with markdown, issue_id, sender_id, sender_name
+    const fullPayload: Record<string, any> = {
+      markdown: message,
+      issue_id: issueId
+    };
+    if (numericSenderId) fullPayload.sender_id = numericSenderId;
+    if (senderName) fullPayload.sender_name = senderName;
+
+    // Variant 2: Minimal markdown only
+    const minimalPayload = {
+      markdown: message
     };
 
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}/messages/`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload)
-    });
+    // Variant 3: Both markdown and message
+    const dualPayload: Record<string, any> = {
+      markdown: message,
+      message
+    };
+    if (numericSenderId) dualPayload.sender_id = numericSenderId;
 
-    if (!response.ok) return { success: false };
+    let response: Response | null = null;
+    let data: any = null;
 
-    const data = await response.json();
-    const item = data.data || data;
+    for (const url of endpoints) {
+      // 1. Try full payload
+      response = await fetch(url, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(fullPayload)
+      }).catch(() => null);
+
+      // If 422, retry with minimal payload
+      if (response && response.status === 422) {
+        const err422 = await response.text().catch(() => '');
+        console.warn(`[apiSendMessage] 422 on ${url} with full payload: ${err422}. Retrying with minimal payload...`);
+        
+        response = await fetch(url, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(minimalPayload)
+        }).catch(() => null);
+      }
+
+      // If still 422, try dual payload
+      if (response && response.status === 422) {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(dualPayload)
+        }).catch(() => null);
+      }
+
+      if (response && response.ok) {
+        data = await response.json().catch(() => null);
+        break;
+      }
+    }
+
+    if (!response || !response.ok) {
+      console.error('[apiSendMessage] Message post failed with status:', response?.status);
+      return { success: false };
+    }
+
+    // Process server response which could be array [ { id, issue_id, sender_id, sender_name, markdown, created_at } ] or single item
+    const item = Array.isArray(data) ? data[data.length - 1] : (data?.data || data);
+
+    const normalized = normalizeDiscussionMessage(item || {
+      id: `msg-${Date.now()}`,
+      issue_id: issueId,
+      sender_id: numericSenderId,
+      sender_name: senderName || 'User',
+      markdown: message,
+      created_at: new Date().toISOString()
+    }, issueId);
 
     return {
       success: true,
-      message: {
-        id: String(item.id || `msg-${Date.now()}`),
-        issueId,
-        senderId: String(item.sender_id || senderId || ''),
-        senderName: item.sender_name || 'User',
-        senderRole: item.sender_role || 'Supporter',
-        message,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }
+      message: normalized
     };
-  } catch {
+  } catch (err) {
+    console.error('[apiSendMessage] Error:', err);
     return { success: false };
   }
 }

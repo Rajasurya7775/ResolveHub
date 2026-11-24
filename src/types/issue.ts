@@ -51,7 +51,15 @@ export interface DiscussionMessage {
   senderName: string;
   senderRole: 'Support' | 'Supporter' | 'Developer';
   message: string;
+  markdown?: string;
+  createdAt?: string;
   timestamp: string;
+  attachment?: {
+    name: string;
+    size?: string;
+    url?: string;
+  };
+  reaction?: string;
 }
 
 export interface Issue {

@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useIssues } from '../../context/IssueContext';
 import { useAuth } from '../../context/AuthContext';
 import { Issue, DiscussionMessage } from '../../types/issue';
-import { apiFetchIssueById, apiFetchMessages } from '../../services/api/issueService';
+import { apiFetchIssueById, apiFetchMessages, apiSendMessage } from '../../services/api/issueService';
 
 const PROJECT_OPTIONS = [
   'Nokia Production Dashboard',
@@ -25,7 +25,7 @@ export const IssueDetailsPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { getIssueById, updateIssue, deleteIssue, addDiscussionMessage } = useIssues();
+  const { getIssueById, updateIssue, deleteIssue } = useIssues();
   const { currentUser } = useAuth();
 
   // Determine back route from location state
@@ -189,18 +189,35 @@ export const IssueDetailsPage: React.FC = () => {
     setMessageText('');
     setIsSending(true);
 
+    const isDeveloper = String(currentUser?.role || '').toLowerCase().includes('dev');
+    const senderRole = isDeveloper ? 'Developer' : 'Supporter';
+
+    const now = new Date();
+    const formattedTimestamp = `${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} • ${now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
+
+    const optimisticMsg: DiscussionMessage = {
+      id: `temp-${Date.now()}`,
+      issueId: id,
+      senderId: String(currentUser?.id || '38'),
+      senderName: currentUser?.name || 'Sivabalan',
+      senderRole,
+      message: text,
+      markdown: text,
+      timestamp: formattedTimestamp
+    };
+
+    // Immediately display optimistic message in UI
+    setMessages((prev) => [...prev, optimisticMsg]);
+
     try {
-      await addDiscussionMessage(id, text);
-      const optimisticMsg: DiscussionMessage = {
-        id: `msg-${Date.now()}`,
-        issueId: id,
-        senderId: currentUser?.employeeId || 'EMP',
-        senderName: currentUser?.name || 'Supporter',
-        senderRole: currentUser?.role || 'Support',
-        message: text,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages((prev) => [...prev, optimisticMsg]);
+      const res = await apiSendMessage(id, text, currentUser?.id, currentUser?.name);
+      if (res.success && res.message) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === optimisticMsg.id ? res.message! : m))
+        );
+      } else {
+        await fetchLiveMessages();
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
     } finally {
@@ -745,16 +762,16 @@ export const IssueDetailsPage: React.FC = () => {
                 <div className="d-flex align-items-center gap-2.5">
                   <i className="bi bi-chat-dots-fill text-primary fs-5"></i>
                   <div>
-                    <h6 className="fw-bold text-navy mb-0" style={{ fontSize: '0.92rem' }}>
+                    <h6 className="fw-bold text-navy mb-0" style={{ fontSize: '0.95rem' }}>
                       Incident Collaboration Thread
                     </h6>
                     <small className="text-muted" style={{ fontSize: '0.75rem' }}>
-                      2-way sync between Supporters and Developers
+                      2-way Sync between Supporters and Developers
                     </small>
                   </div>
                 </div>
                 <span
-                  className="badge rounded-pill px-2.5 py-1 small fw-semibold"
+                  className="badge rounded-pill px-3 py-1 small fw-semibold"
                   style={{
                     backgroundColor: '#f1f5f9',
                     color: '#64748b',
@@ -762,12 +779,12 @@ export const IssueDetailsPage: React.FC = () => {
                     fontSize: '0.75rem'
                   }}
                 >
-                  {messages.length} msg{messages.length === 1 ? '' : 's'}
+                  {messages.length} {messages.length === 1 ? 'message' : 'messages'}
                 </span>
               </div>
 
               {/* Scrollable Message List / Empty State */}
-              <div className="p-3 overflow-y-auto flex-grow-1 d-flex flex-column gap-2.5 bg-white">
+              <div className="p-3.5 overflow-y-auto flex-grow-1 d-flex flex-column gap-3.5 bg-white">
                 {messages.length === 0 ? (
                   <div className="my-auto text-center py-5 px-3">
                     {/* Two-bubble illustration matching reference */}
@@ -807,49 +824,95 @@ export const IssueDetailsPage: React.FC = () => {
                   </div>
                 ) : (
                   messages.map((msg) => {
-                    const isSelf =
-                      msg.senderId === currentUser?.employeeId ||
-                      msg.senderName === currentUser?.name;
-                    const isDev =
+                    const isDeveloper =
                       msg.senderRole?.toLowerCase().includes('dev') ||
+                      msg.senderName?.toLowerCase().includes('jeva') ||
                       msg.senderName?.toLowerCase().includes('arun');
 
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`d-flex flex-column ${isSelf ? 'align-items-end' : 'align-items-start'}`}
-                      >
-                        {/* Sender info line */}
-                        <div className="d-flex align-items-center gap-1.5 mb-1 px-1">
-                          <span className="fw-bold text-navy" style={{ fontSize: '0.76rem' }}>
-                            {msg.senderName}
-                          </span>
-                          <span
-                            className={`badge px-1.5 py-0 rounded-pill ${isDev ? 'bg-purple-subtle text-purple' : 'bg-primary-subtle text-primary'
-                              }`}
-                            style={{ fontSize: '0.65rem' }}
-                          >
-                            {msg.senderRole}
-                          </span>
-                          <span className="text-muted" style={{ fontSize: '0.68rem' }}>
-                            {msg.timestamp}
-                          </span>
-                        </div>
+                    const avatarLetter = (msg.senderName || 'U').charAt(0).toUpperCase();
 
-                        {/* Bubble */}
+                    return (
+                      <div key={msg.id} className="d-flex align-items-start gap-2.5">
+                        {/* Avatar on Left */}
                         <div
-                          className="p-2.5 rounded-3 shadow-xs"
+                          className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold shadow-2xs flex-shrink-0"
                           style={{
-                            maxWidth: '85%',
-                            backgroundColor: isSelf ? '#0D6EFD' : '#F1F5F9',
-                            color: isSelf ? '#FFFFFF' : '#1E293B',
-                            border: isSelf ? 'none' : '1px solid #E2E8F0',
-                            fontSize: '0.85rem',
-                            lineHeight: 1.45,
-                            wordBreak: 'break-word'
+                            width: '38px',
+                            height: '38px',
+                            fontSize: '0.95rem',
+                            backgroundColor: isDeveloper ? '#8b5cf6' : '#0d6efd'
                           }}
                         >
-                          {msg.message}
+                          {avatarLetter}
+                        </div>
+
+                        {/* Content on Right */}
+                        <div className="flex-grow-1 min-w-0">
+                          {/* Top Meta Line: Sender Name + Role Badge + Timestamp */}
+                          <div className="d-flex align-items-center justify-content-between mb-1.5">
+                            <div className="d-flex align-items-center gap-2">
+                              <span className="fw-bold text-navy" style={{ fontSize: '0.9rem' }}>
+                                {msg.senderName}
+                              </span>
+                              <span
+                                className="badge rounded-pill px-2.5 py-0.5 fw-semibold"
+                                style={{
+                                  fontSize: '0.72rem',
+                                  // backgroundColor: isDeveloper ? '#f5f3ff' : '#eff6ff',
+                                  // color: isDeveloper ? '#7c3aed' : '#2563eb',
+                                  // border: `1px solid ${isDeveloper ? '#ede9fe' : '#dbeafe'}`
+                                }}
+                              >
+                                {isDeveloper ? 'Developer' : 'Supporter'}
+                              </span>
+                            </div>
+
+                            <span className="text-secondary small" style={{ fontSize: '0.75rem' }}>
+                              {msg.timestamp}
+                            </span>
+                          </div>
+
+                          {/* Message Bubble Container */}
+                          <div
+                            className="rounded-3 p-3 shadow-2xs"
+                            style={{
+                              backgroundColor: isDeveloper ? '#faf5ff' : '#eff6ff',
+                              border: `1px solid ${isDeveloper ? '#f3e8ff' : '#dbeafe'}`,
+                              color: '#1e293b',
+                              fontSize: '0.88rem',
+                              lineHeight: 1.45,
+                              wordBreak: 'break-word',
+                              whiteSpace: 'pre-line'
+                            }}
+                          >
+                            {msg.markdown || msg.message}
+
+                            {/* Attached file capsule if present */}
+                            {msg.attachment && (
+                              <div>
+                                <div
+                                  className="d-inline-flex align-items-center gap-2 px-3 py-1.5 rounded-pill bg-white border mt-2 shadow-2xs"
+                                  style={{ borderColor: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
+                                  title="Download attachment"
+                                >
+                                  <i className="bi bi-paperclip text-secondary"></i>
+                                  <span className="fw-medium text-navy">{msg.attachment.name}</span>
+                                  {msg.attachment.size && <span className="text-muted">({msg.attachment.size})</span>}
+                                  <i className="bi bi-download text-secondary ms-1"></i>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Reaction badge below bubble if present */}
+                          {msg.reaction && (
+                            <div
+                              className="d-inline-flex align-items-center gap-1 px-2.5 py-0.5 rounded-pill bg-white border mt-1 shadow-2xs"
+                              style={{ borderColor: '#e2e8f0', fontSize: '0.75rem' }}
+                            >
+                              <span>{msg.reaction}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -865,7 +928,7 @@ export const IssueDetailsPage: React.FC = () => {
                     className="d-flex align-items-center gap-2 rounded-pill px-3 py-1.5"
                     style={{ border: '1px solid #cbd5e1', backgroundColor: '#ffffff' }}
                   >
-                    <i className="bi bi-paperclip text-secondary fs-5" style={{ cursor: 'pointer' }}></i>
+                    <i className="bi bi-paperclip text-secondary fs-5" style={{ cursor: 'pointer' }} title="Attach file"></i>
                     <input
                       type="text"
                       className="form-control border-0 bg-transparent shadow-none px-1 small text-navy"
