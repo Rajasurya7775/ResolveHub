@@ -1,3 +1,23 @@
+<<<<<<< HEAD
+# Environment
+.env
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Seed files
+seed_*.py
+
+# Test files
+test_*.py
+tests/
+
+# Logs
+*.log
+=======
 .venv/
 **/.venv/
 __pycache__/
@@ -10,3 +30,4 @@ __pycache__/
 *.sqlite3
 .pytest_cache/
 .vscode/
+>>>>>>> origin/backend-1

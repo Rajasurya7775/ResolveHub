@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.models.issue import Issue
     from app.models.message import IssueMessage
     from app.models.project import Project
+    from app.models.time_log import TimeLog
 
 
 class User(Base):
@@ -24,7 +25,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
     role: Mapped[str] = mapped_column(String(20), nullable=False)
-    role_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    role_type: Mapped[str] = mapped_column(String(100), nullable=False)
     account_status: Mapped[str] = mapped_column(String(20), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -54,4 +55,9 @@ class User(Base):
     # user_management 1 --- 0..* issue_messages_management ("sends")
     messages: Mapped[list["IssueMessage"]] = relationship(
         back_populates="sender",
+    )
+        # user_management 1 --- 0..* time_logs
+        
+    time_logs: Mapped[list["TimeLog"]] = relationship(
+        back_populates="user"
     )
