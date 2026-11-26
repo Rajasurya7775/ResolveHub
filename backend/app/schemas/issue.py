@@ -38,10 +38,39 @@ class IssueResponse(BaseModel):
     issue_created_by: int
     issue_created_at: datetime
     assigned_to: int | str | None = None
+    assigned_to_name: str | None = None
     assigned_at: datetime | None = None
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class IssueListProject(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    project_name: str
+
+
+class IssueListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    issue_id: UUID
+    issue_number: str
+    project: IssueListProject
+    issue_title: str
+    issue_type: str
+    issue_status: str
+    assigned_to_name: str | None
+    issue_created_at: datetime
+    issue_shift: str | None
+
+
+class IssueListResponse(BaseModel):
+    items: list[IssueListItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class ProjectDropdownResponse(BaseModel):
@@ -49,6 +78,14 @@ class ProjectDropdownResponse(BaseModel):
     project_name: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectDetailResponse(ProjectDropdownResponse):
+    project_status: str
+    project_description: str | None
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class DeveloperDropdownResponse(BaseModel):

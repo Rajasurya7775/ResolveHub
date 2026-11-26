@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Issue, Project
+from app.models import Issue, Project, User
 
 
 def get_previous_issues(
@@ -97,7 +97,7 @@ def get_previous_issues(
 
     # Apply pagination
     paged_query = (
-        query
+        query.options(joinedload(Issue.assignee).load_only(User.full_name))
         .order_by(
             Issue.issue_created_at.desc(),
             Issue.issue_id.desc(),

@@ -104,9 +104,9 @@ def get_my_issues(
     # Total count with the same filters (before limit/offset)
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
-    # Paged results: newest first, with project loaded
+    # Paged results: newest first, with project and assignee loaded
     paged_query = (
-        query.options(joinedload(Issue.project))
+        query.options(joinedload(Issue.assignee).load_only(User.full_name))
         .order_by(Issue.issue_created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)

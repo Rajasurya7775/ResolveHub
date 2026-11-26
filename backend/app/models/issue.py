@@ -111,6 +111,16 @@ class Issue(Base):
         foreign_keys=[assigned_to],
     )
 
+    @property
+    def issue_created_by_name(self) -> str | None:
+        creator = self.creator
+        return creator.full_name if creator is not None else None
+
+    @property
+    def assigned_to_name(self) -> str | None:
+        assignee = self.assignee
+        return assignee.full_name if assignee is not None else None
+
     messages: Mapped[list["IssueMessage"]] = relationship(
         back_populates="issue",
         cascade="all, delete-orphan",
@@ -118,7 +128,8 @@ class Issue(Base):
     )
 
     audit_logs: Mapped[list["AuditLog"]] = relationship(
-    back_populates="issue"
+        back_populates="issue",
+        passive_deletes="all",
     )
     time_logs: Mapped[list["TimeLog"]] = relationship(
     back_populates="issue"

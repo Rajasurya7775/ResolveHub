@@ -1,28 +1,22 @@
 
-from uuid import UUID, uuid4
+from uuid import uuid4
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.enums import Role, AccountStatus
-from app.core.websocket_manager import manager
+from app.core.dashboard_events import publish_dashboard_update
 from app.db.session import get_db
 from app.models import Issue, Project, User
 from app.schemas.issue import (
     IssueCreate,
-    IssueUpdate,
     IssueResponse,
     ProjectDropdownResponse,
     DeveloperDropdownResponse,
 )
-from app.services.issue_service import (
-    update_issue as update_issue_service,
-    delete_issue as delete_issue_service,
-)
-
 
 router = APIRouter(
     prefix="/issues",
@@ -79,6 +73,7 @@ def get_issue_developers(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_issue(
+    request: Request,
     issue_data: IssueCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -146,112 +141,6 @@ async def create_issue(
             detail="Unable to create issue. Please try again.",
         )
 
-    try:
-        await manager.broadcast({
-            "event": "dashboard_updated",
-            "action": "issue_created",
-            "issue_number": new_issue.issue_number,
-        })
-    except Exception:
-        logger.exception("Issue created, but dashboard broadcast failed")
+    await publish_dashboard_update(request.app.state.dashboard_redis)
 
     return new_issue
-
-
-# --------------------------------------------------
-# PATCH: Update an existing issue
-# --------------------------------------------------
-@router.patch(
-    "/{issue_id}",
-    response_model=IssueResponse,
-)
-async def update_issue_endpoint(
-    issue_id: UUID,
-    issue_data: IssueUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    update_data = issue_data.model_dump(exclude_unset=True)
-
-    if not update_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No fields provided for update.",
-        )
-
-    try:
-        updated_issue = update_issue_service(
-            db=db,
-            current_user=current_user,
-            issue_id=issue_id,
-            update_data=update_data,
-        )
-
-    except HTTPException:
-        raise
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-
-    if "issue_status" in update_data:
-        action = "issue_status_changed"
-    elif "assigned_to" in update_data:
-        action = "issue_assigned"
-    else:
-        action = "issue_updated"
-
-    try:
-        await manager.broadcast({
-            "event": "dashboard_updated",
-            "action": action,
-            "issue_number": updated_issue.issue_number,
-        })
-    except Exception:
-        logger.exception("Issue updated, but dashboard broadcast failed")
-
-    return updated_issue
-
-
-# --------------------------------------------------
-# DELETE: Delete an existing issue
-# --------------------------------------------------
-@router.delete("/{issue_id}")
-async def delete_issue_endpoint(
-    issue_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    try:
-        # Capture issue number before deletion
-        issue = db.get(Issue, issue_id)
-
-        if issue is None or issue.deleted_at is not None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Issue not found.",
-            )
-
-        issue_number = issue.issue_number
-
-        result = delete_issue_service(
-            db=db,
-            current_user=current_user,
-            issue_id=issue_id,
-        )
-
-    except HTTPException:
-        raise
-
-    try:
-        await manager.broadcast({
-            "event": "dashboard_updated",
-            "action": "issue_deleted",
-            "issue_number": issue_number,
-        })
-    except Exception:
-        logger.exception("Issue deleted, but dashboard broadcast failed")
-
-    return result

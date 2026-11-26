@@ -2,10 +2,10 @@
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func
+from sqlalchemy import Date, case, func
 from sqlalchemy.orm import Session
 
-from app.core.enums import Role
+from app.core.enums import IssueType, Role
 from app.api.deps import require_roles
 from app.db.session import get_db
 from app.models import User, Issue
@@ -63,34 +63,35 @@ def issue_trends(
     end_datetime = datetime.combine(week_end, time.min)
  
     # Count issues separately by status for each day
+    issue_day = func.date(Issue.issue_time, type_=Date)
     results = (
         db.query(
-            func.date(Issue.issue_time).label("issue_day"),
+            issue_day.label("issue_day"),
  
             func.sum(
                 case(
-                    (Issue.issue_status == "OPEN", 1),
+                    (Issue.issue_status == "Open", 1),
                     else_=0,
                 )
             ).label("open_tickets"),
  
             func.sum(
                 case(
-                    (Issue.issue_status == "IN_PROGRESS", 1),
+                    (Issue.issue_status == "In progress", 1),
                     else_=0,
                 )
             ).label("in_progress_tickets"),
  
             func.sum(
                 case(
-                    (Issue.issue_status == "HOLD", 1),
+                    (Issue.issue_status == "Hold", 1),
                     else_=0,
                 )
             ).label("hold_tickets"),
  
             func.sum(
                 case(
-                    (Issue.issue_status == "RESOLVED", 1),
+                    (Issue.issue_status == "Resolved", 1),
                     else_=0,
                 )
             ).label("resolved_tickets"),
@@ -100,7 +101,7 @@ def issue_trends(
             Issue.issue_time >= start_datetime,
             Issue.issue_time < end_datetime,
         )
-        .group_by(func.date(Issue.issue_time))
+        .group_by(issue_day)
         .all()
     )
  
@@ -214,7 +215,7 @@ def issue_type_distribution(
     def normalize_type(issue_type):
         value = (issue_type or "").strip().upper()
 
-        if value == "FRONT-END":
+        if value in (IssueType.FRONTEND, "FRONT-END"):
             return "Front-end"
         elif value == "BACKEND":
             return "Backend"

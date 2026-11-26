@@ -1,12 +1,13 @@
 
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Issue, Project, User
+from app.models import AuditLog, Issue, Project, User
+from app.schemas.issue import IssueUpdate
 
 
 def _role_value(user):
@@ -24,12 +25,14 @@ def _get_authorized_user(current_user: User):
         )
 
 
-def _get_issue(db: Session, issue_id: UUID):
+def _get_issue(db: Session, issue_id: UUID, *, for_update: bool = False):
     query = (
         select(Issue)
         .options(selectinload(Issue.project))
         .where(Issue.issue_id == issue_id)
     )
+    if for_update:
+        query = query.with_for_update().execution_options(populate_existing=True)
 
     issue = db.scalars(query).first()
 
@@ -51,18 +54,35 @@ def get_issue_details(
     return _get_issue(db, issue_id)
 
 
+def _audit_value(value) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return None if value is None else str(value)
+
+
 def update_issue(
     db: Session,
     current_user: User,
     issue_id: UUID,
     update_data: dict
-):
+) -> tuple[Issue, bool]:
     _get_authorized_user(current_user)
 
-    issue = _get_issue(db, issue_id)
-    data = update_data.copy()
-
     try:
+        issue = _get_issue(db, issue_id, for_update=True)
+        data = {
+            field: value
+            for field, value in update_data.items()
+            if field in IssueUpdate.model_fields
+        }
+        tracked_fields = dict.fromkeys(data)
+        if "assigned_to" in data:
+            tracked_fields["assigned_at"] = None
+        if "issue_status" in data:
+            tracked_fields["resolved_at"] = None
+        original = {field: getattr(issue, field) for field in tracked_fields}
+        changed_at = datetime.now(timezone.utc)
+
         # Validate project
         if "project_id" in data:
             if data["project_id"] is None:
@@ -128,7 +148,7 @@ def update_issue(
             if issue.assigned_to != new_assignee_id:
                 issue.assigned_to = new_assignee_id
                 issue.assigned_at = (
-                    datetime.now(timezone.utc)
+                    changed_at
                     if new_assignee_id is not None
                     else None
                 )
@@ -149,7 +169,7 @@ def update_issue(
 
             if str(new_status).upper() == "RESOLVED":
                 if str(current_status).upper() != "RESOLVED":
-                    issue.resolved_at = datetime.now(timezone.utc)
+                    issue.resolved_at = changed_at
 
             elif str(current_status).upper() == "RESOLVED":
                 issue.resolved_at = None
@@ -157,14 +177,40 @@ def update_issue(
         # Update remaining fields
         for field, value in data.items():
             if field == "issue_priority" and value is not None:
-                value = getattr(value, "value", value)
-
+                value = str(getattr(value, "value", value))
             setattr(issue, field, value)
 
-        # Commit database changes
-        db.commit()
+        # Read back timestamps using the database column's timezone semantics.
+        timestamp_fields = [
+            field for field in ("issue_time", "assigned_at")
+            if field in original and original[field] != getattr(issue, field)
+        ]
+        if timestamp_fields:
+            db.flush()
+            db.refresh(issue, attribute_names=timestamp_fields)
 
-        return _get_issue(db, issue_id)
+        group_id = uuid4()
+        actor_role = "Developer" if _role_value(current_user) == "DEVELOPER" else "Supporter"
+        audit_changed = False
+        for field, old_value in original.items():
+            new_value = getattr(issue, field)
+            if old_value != new_value:
+                audit_changed = True
+                db.add(
+                    AuditLog(
+                        issue_id=issue_id,
+                        user_id=current_user.user_id,
+                        actor_name=current_user.full_name,
+                        actor_role=actor_role,
+                        change_group_id=group_id,
+                        field=field,
+                        old_value=_audit_value(old_value),
+                        new_value=_audit_value(new_value),
+                        updated_at=changed_at,
+                    )
+                )
+
+        db.commit()
 
     except HTTPException:
         db.rollback()
@@ -177,6 +223,8 @@ def update_issue(
             detail="Unable to update issue."
         )
 
+    return _get_issue(db, issue_id), audit_changed
+
 
 def delete_issue(
     db: Session,
@@ -187,15 +235,20 @@ def delete_issue(
 
     issue = _get_issue(db, issue_id)
 
+    # Capture issue number before deletion
+    issue_number = issue.issue_number
+
     try:
         # Load associated messages before deletion
         list(issue.messages)
 
+        # Delete issue
         db.delete(issue)
         db.commit()
 
         return {
-            "message": "Issue deleted successfully."
+            "message": "Issue deleted successfully.",
+            "issue_number": issue_number
         }
 
     except Exception:

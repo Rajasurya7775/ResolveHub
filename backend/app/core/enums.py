@@ -15,10 +15,10 @@ class IssuePriority(StrEnum):
 
 
 class IssueStatus(StrEnum):
-    OPEN = "OPEN"
-    IN_PROGRESS = "IN_PROGRESS"
-    RESOLVED = "RESOLVED"
-    HOLD = "HOLD"
+    OPEN = "Open"
+    IN_PROGRESS = "In progress"
+    RESOLVED = "Resolved"
+    HOLD = "Hold"
 
 
 class Role(StrEnum):
