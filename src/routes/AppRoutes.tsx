@@ -25,14 +25,14 @@ export const AppRoutes: React.FC = () => {
           {/* Support Routes */}
           <Route path="/support/home" element={<DashboardPage role="Support" />} />
           <Route path="/support" element={<Navigate to="/support/home" replace />} />
-          <Route path="/support/my-issues" element={<IssuesListPage scope="my-issues" />} />
-          <Route path="/support/previous-issues" element={<IssuesListPage scope="previous-issues" />} />
+          <Route path="/support/my-issues" element={<IssuesListPage key="support-my" scope="my-issues" />} />
+          <Route path="/support/previous-issues" element={<IssuesListPage key="support-prev" scope="previous-issues" />} />
 
           {/* Developer Routes */}
           <Route path="/developer/home" element={<DashboardPage role="Developer" />} />
           <Route path="/developer" element={<Navigate to="/developer/home" replace />} />
-          <Route path="/developer/assigned" element={<IssuesListPage scope="my-issues" />} />
-          <Route path="/developer/all" element={<IssuesListPage scope="previous-issues" />} />
+          <Route path="/developer/assigned" element={<IssuesListPage key="dev-assigned" scope="my-issues" />} />
+          <Route path="/developer/all" element={<IssuesListPage key="dev-all" scope="previous-issues" />} />
 
           {/* Shared Incident Details, Reporting & Profile */}
           <Route path="/issues/new" element={<IssueFormPage />} />

@@ -49,10 +49,12 @@ export interface DiscussionMessage {
   issueId: string;
   senderId: string;
   senderName: string;
-  senderRole: 'Support' | 'Supporter' | 'Developer';
+  senderRole?: 'Support' | 'Supporter' | 'Developer' | string;
   message: string;
   markdown?: string;
   createdAt?: string;
+  updatedAt?: string;
+  isEdited?: boolean;
   timestamp: string;
   attachment?: {
     name: string;
@@ -60,8 +62,6 @@ export interface DiscussionMessage {
     url?: string;
   };
   reaction?: string;
-  isEdited?: boolean;
-  editedAt?: string;
 }
 
 export interface Issue {

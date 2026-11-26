@@ -21,6 +21,7 @@ const ISSUE_STATUS_OPTIONS = [
   'In progress',
   'Pending',
   'On Hold',
+  'Escalated',
   'Resolved'
 ];
 
@@ -61,10 +62,11 @@ export const IssueFormPage: React.FC = () => {
   const [developers, setDevelopers] = useState<DeveloperItem[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isLoadingDevelopers, setIsLoadingDevelopers] = useState(false);
+  const [optionsError, setOptionsError] = useState<string>('');
 
   // 10 Required Fields matching specifications:
   // 1. Project (Dropdown from API /issues/projects)
-  const [projectId, setProjectId] = useState<string>('Nokia Production Dashboard');
+  const [projectId, setProjectId] = useState<string>('');
   // 2. Shift (Shift-A, Shift-B, Shift-C, General)
   const [shift, setShift] = useState<string>(getDefaultShift);
   // 3. Issue Occurrence time (calendar with time)
@@ -98,6 +100,7 @@ export const IssueFormPage: React.FC = () => {
     async function loadOptions() {
       setIsLoadingProjects(true);
       setIsLoadingDevelopers(true);
+      setOptionsError('');
 
       const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
       const targetRole = isDev ? 'supporter' : 'developer';
@@ -108,16 +111,27 @@ export const IssueFormPage: React.FC = () => {
       ]);
 
       if (isMounted) {
-        if (projRes.data && projRes.data.length > 0) {
+        const errs: string[] = [];
+        if (projRes.success && projRes.data.length > 0) {
           setProjects(projRes.data);
-          setProjectId(String(projRes.data[0].id || projRes.data[0].name));
+          setProjectId((prev) => prev || String(projRes.data[0].id || projRes.data[0].name));
+        } else {
+          setProjects([]);
+          if (!projRes.success) errs.push(projRes.message || 'Failed to load projects.');
         }
         setIsLoadingProjects(false);
 
-        if (devRes.data && devRes.data.length > 0) {
+        if (devRes.success && devRes.data.length > 0) {
           setDevelopers(devRes.data);
+        } else {
+          setDevelopers([]);
+          if (!devRes.success) errs.push(devRes.message || 'Failed to load assignees.');
         }
         setIsLoadingDevelopers(false);
+
+        if (errs.length > 0) {
+          setOptionsError(errs.join(' '));
+        }
       }
     }
 
@@ -126,7 +140,7 @@ export const IssueFormPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [currentUser?.role]);
 
   const handleDeveloperChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -223,7 +237,7 @@ export const IssueFormPage: React.FC = () => {
           Create Technical Incident
         </h4>
         <p className="text-secondary small mb-0">
-          Logged-in Supporter: <strong className="text-navy">{currentUser?.name || 'Supporter'}</strong> ({currentUser?.employeeId || 'EMP'})
+          Logged-in User: <strong className="text-navy">{currentUser?.name || '—'}</strong> ({currentUser?.employeeId || '—'})
         </p>
       </div>
 
@@ -267,10 +281,10 @@ export const IssueFormPage: React.FC = () => {
         /* Issue Form Card */
         <div className="card border-0 shadow-sm rounded-4 p-4 bg-white">
           
-          {submitError && (
+          {(submitError || optionsError) && (
             <div className="alert alert-danger py-2 px-3 small rounded-3 d-flex align-items-center mb-3">
               <i className="bi bi-exclamation-triangle-fill me-2 fs-6"></i>
-              <span>{submitError}</span>
+              <span>{submitError || optionsError}</span>
             </div>
           )}
 
@@ -296,7 +310,9 @@ export const IssueFormPage: React.FC = () => {
                   className={`form-select ${errors.projectId ? 'is-invalid' : ''}`}
                   value={projectId}
                   onChange={(e) => setProjectId(e.target.value)}
+                  disabled={isLoadingProjects}
                 >
+                  <option value="">{isLoadingProjects ? 'Loading projects...' : '-- Select Project --'}</option>
                   {projects.map((p) => (
                     <option key={String(p.id)} value={String(p.id || p.name)}>
                       {p.name}

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getRoleConfig, resolveRoleKey } from '../../config/roleConfig';
 import { IssueTableFilters } from '../../components/issues/IssueTableFilters';
@@ -20,13 +20,22 @@ export interface IssuesListPageProps {
 
 export const IssuesListPage: React.FC<IssuesListPageProps> = ({ scope }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useAuth();
   const effectiveRole = resolveRoleKey(currentUser?.role);
   const roleConfig = getRoleConfig(effectiveRole);
   const tableConfig = scope === 'my-issues' ? roleConfig.tables.primary : roleConfig.tables.secondary;
 
   const PAGE_SIZE = 10;
-  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  const parsePositivePage = (val: string | null): number => {
+    const n = Number(val);
+    return Number.isInteger(n) && n >= 1 ? n : 1;
+  };
+
+  // Initialize state from URL query params so browser Back (navigate(-1)) preserves everything
+  const [currentPage, setCurrentPage] = useState<number>(() => parsePositivePage(searchParams.get('page')));
   const [totalPages, setTotalPages] = useState<number>(1);
   const [totalIssues, setTotalIssues] = useState<number>(0);
   const [hasNext, setHasNext] = useState<boolean>(false);
@@ -38,12 +47,88 @@ export const IssuesListPage: React.FC<IssuesListPageProps> = ({ scope }) => {
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
 
   // The 6 Specified Filters
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [projectFilter, setProjectFilter] = useState<string>('All');
-  const [typeFilter, setTypeFilter] = useState<string>('All');
-  const [dateFilter, setDateFilter] = useState<string>('');
-  const [shiftFilter, setShiftFilter] = useState<string>('All');
-  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [searchTerm, setSearchTerm] = useState<string>(() => searchParams.get('search') || '');
+  const [projectFilter, setProjectFilter] = useState<string>(() => searchParams.get('project') || 'All');
+  const [typeFilter, setTypeFilter] = useState<string>(() => searchParams.get('type') || 'All');
+  const [dateFilter, setDateFilter] = useState<string>(() => searchParams.get('date') || '');
+  const [shiftFilter, setShiftFilter] = useState<string>(() => searchParams.get('shift') || 'All');
+  const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get('status') || 'All');
+
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const isFirstRenderRef = useRef<boolean>(true);
+  const pendingScrollRestoreRef = useRef<number | null>(null);
+  const lastWrittenSearchRef = useRef<string>(location.search);
+
+  const buildQueryString = useCallback(
+    (
+      pageVal: number,
+      searchVal: string,
+      projectVal: string,
+      typeVal: string,
+      dateVal: string,
+      shiftVal: string,
+      statusVal: string
+    ) => {
+      const next = new URLSearchParams();
+      if (searchVal.trim()) next.set('search', searchVal);
+      if (projectVal !== 'All') next.set('project', projectVal);
+      if (typeVal !== 'All') next.set('type', typeVal);
+      if (dateVal) next.set('date', dateVal);
+      if (shiftVal !== 'All') next.set('shift', shiftVal);
+      if (statusVal !== 'All') next.set('status', statusVal);
+      if (pageVal > 1) next.set('page', String(pageVal));
+      return next;
+    },
+    []
+  );
+
+  // Sync URL searchParams when filters or page change
+  const syncParamsToUrl = useCallback(
+    (
+      pageVal: number,
+      searchVal: string,
+      projectVal: string,
+      typeVal: string,
+      dateVal: string,
+      shiftVal: string,
+      statusVal: string
+    ) => {
+      const next = buildQueryString(pageVal, searchVal, projectVal, typeVal, dateVal, shiftVal, statusVal);
+      const nextStr = next.toString();
+      lastWrittenSearchRef.current = nextStr ? `?${nextStr}` : '';
+      setSearchParams(next, { replace: true });
+    },
+    [buildQueryString, setSearchParams]
+  );
+
+  // Handle external navigation (e.g. Sidebar click resetting URL or browser back/forward)
+  useEffect(() => {
+    if (location.search === lastWrittenSearchRef.current) return;
+    lastWrittenSearchRef.current = location.search;
+
+    const params = new URLSearchParams(location.search);
+    setSearchTerm(params.get('search') || '');
+    setProjectFilter(params.get('project') || 'All');
+    setTypeFilter(params.get('type') || 'All');
+    setDateFilter(params.get('date') || '');
+    setShiftFilter(params.get('shift') || 'All');
+    setStatusFilter(params.get('status') || 'All');
+    setCurrentPage(parsePositivePage(params.get('page')));
+  }, [location.search]);
+
+  // Check if a saved scroll position exists for this route/filter state on mount
+  useEffect(() => {
+    const scrollKey = `resolvehub_list_scroll_${location.pathname}${location.search}`;
+    const savedScroll = sessionStorage.getItem(scrollKey);
+    if (savedScroll !== null) {
+      const parsed = Number(savedScroll);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        pendingScrollRestoreRef.current = parsed;
+      } else {
+        sessionStorage.removeItem(scrollKey);
+      }
+    }
+  }, [location.pathname, location.search]);
 
   // Load project options for dropdown filter
   useEffect(() => {
@@ -109,19 +194,76 @@ export const IssuesListPage: React.FC<IssuesListPageProps> = ({ scope }) => {
     [scope, tableConfig.title, PAGE_SIZE, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter, searchTerm]
   );
 
-  // Debounced filter effect: reset to page 1
+  // Restore scroll position once issues render after returning via Back navigation
   useEffect(() => {
-    setCurrentPage(1);
+    if (!isLoading && issues.length > 0 && pendingScrollRestoreRef.current !== null && tableScrollRef.current) {
+      const targetScroll = pendingScrollRestoreRef.current;
+      const scrollKey = `resolvehub_list_scroll_${location.pathname}${location.search}`;
+      pendingScrollRestoreRef.current = null;
+      sessionStorage.removeItem(scrollKey);
+      requestAnimationFrame(() => {
+        if (tableScrollRef.current) {
+          tableScrollRef.current.scrollTop = targetScroll;
+        }
+      });
+    }
+  }, [isLoading, issues, location.pathname, location.search]);
+
+  // Fetch on initial mount with preserved page, and debounce on subsequent filter changes
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      fetchPageData(currentPage);
+      return;
+    }
+
     const timer = setTimeout(() => {
-      fetchPageData(1);
+      fetchPageData(currentPage);
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter, fetchPageData]);
+  }, [searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter, currentPage, fetchPageData]);
+
+  // Filter change helpers: reset to page 1 & sync URL params
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    setCurrentPage(1);
+    syncParamsToUrl(1, val, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter);
+  };
+
+  const handleProjectChange = (val: string) => {
+    setProjectFilter(val);
+    setCurrentPage(1);
+    syncParamsToUrl(1, searchTerm, val, typeFilter, dateFilter, shiftFilter, statusFilter);
+  };
+
+  const handleTypeChange = (val: string) => {
+    setTypeFilter(val);
+    setCurrentPage(1);
+    syncParamsToUrl(1, searchTerm, projectFilter, val, dateFilter, shiftFilter, statusFilter);
+  };
+
+  const handleDateChange = (val: string) => {
+    setDateFilter(val);
+    setCurrentPage(1);
+    syncParamsToUrl(1, searchTerm, projectFilter, typeFilter, val, shiftFilter, statusFilter);
+  };
+
+  const handleShiftChange = (val: string) => {
+    setShiftFilter(val);
+    setCurrentPage(1);
+    syncParamsToUrl(1, searchTerm, projectFilter, typeFilter, dateFilter, val, statusFilter);
+  };
+
+  const handleStatusChange = (val: string) => {
+    setStatusFilter(val);
+    setCurrentPage(1);
+    syncParamsToUrl(1, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, val);
+  };
 
   const handlePageChange = (newPage: number) => {
     if (newPage === currentPage || newPage < 1 || (totalPages > 0 && newPage > totalPages)) return;
     setCurrentPage(newPage);
-    fetchPageData(newPage);
+    syncParamsToUrl(newPage, searchTerm, projectFilter, typeFilter, dateFilter, shiftFilter, statusFilter);
   };
 
   const handleClearFilters = () => {
@@ -132,9 +274,16 @@ export const IssuesListPage: React.FC<IssuesListPageProps> = ({ scope }) => {
     setShiftFilter('All');
     setStatusFilter('All');
     setCurrentPage(1);
+    syncParamsToUrl(1, '', 'All', 'All', '', 'All', 'All');
   };
 
   const handleRowClick = (issue: Issue) => {
+    // Save exact scroll position of table before navigating to Issue Details
+    if (tableScrollRef.current) {
+      const scrollKey = `resolvehub_list_scroll_${location.pathname}${location.search}`;
+      sessionStorage.setItem(scrollKey, String(tableScrollRef.current.scrollTop));
+    }
+
     navigate(`/issues/${issue.issueId || issue.id}`, {
       state: {
         from: tableConfig.backPath,
@@ -154,18 +303,18 @@ export const IssuesListPage: React.FC<IssuesListPageProps> = ({ scope }) => {
       {/* 1. Reusable 6 Filters Bar */}
       <IssueTableFilters
         searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
+        onSearchChange={handleSearchChange}
         projectFilter={projectFilter}
-        onProjectChange={setProjectFilter}
+        onProjectChange={handleProjectChange}
         projectOptions={projectOptions}
         typeFilter={typeFilter}
-        onTypeChange={setTypeFilter}
+        onTypeChange={handleTypeChange}
         dateFilter={dateFilter}
-        onDateChange={setDateFilter}
+        onDateChange={handleDateChange}
         shiftFilter={shiftFilter}
-        onShiftChange={setShiftFilter}
+        onShiftChange={handleShiftChange}
         statusFilter={statusFilter}
-        onStatusChange={setStatusFilter}
+        onStatusChange={handleStatusChange}
         onClearFilters={handleClearFilters}
         onExportCsv={handleExportCsv}
       />
@@ -217,6 +366,7 @@ export const IssuesListPage: React.FC<IssuesListPageProps> = ({ scope }) => {
           issues={issues}
           isLoading={isLoading}
           onRowClick={handleRowClick}
+          scrollContainerRef={tableScrollRef}
           emptyMessage={`No issues found in ${tableConfig.title} matching your selected filters.`}
         />
 

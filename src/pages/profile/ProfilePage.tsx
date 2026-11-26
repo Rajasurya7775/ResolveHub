@@ -41,7 +41,7 @@ export const ProfilePage: React.FC = () => {
   const userEmail = currentUser?.email || '—';
   const employeeId = currentUser?.employeeId || (currentUser as any)?.employee_id || '—';
   const userId = currentUser?.id || (currentUser as any)?.user_id || '—';
-  const role = currentUser?.role || 'Developer';
+  const role = currentUser?.role || '—';
   const rawStatus = currentUser?.accountStatus || (currentUser as any)?.account_status || 'ACTIVE';
   const accountStatus = String(rawStatus).toUpperCase() === 'ACTIVE' ? 'ACTIVE' : String(rawStatus);
 

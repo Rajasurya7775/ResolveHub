@@ -60,10 +60,9 @@ const ISSUE_PAGE_SIZE = 10;
 
 export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, isAuthenticated } = useAuth();
-  const isMock = import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
   const location = useLocation();
 
-  // No mock data: purely dynamic lists initialized empty or from user session cache
+  // Dynamic lists populated strictly from backend APIs and authenticated session cache
   const [myIssues, setMyIssues] = useState<Issue[]>(() => {
     try {
       const saved = localStorage.getItem(MY_ISSUES_STORAGE_KEY);
@@ -118,7 +117,6 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Fetch one page of My Issues from the backend.
   const refreshMyIssues = useCallback(async (page: number = 1) => {
-    if (isMock) return;
     const token = localStorage.getItem('resolvehub_auth_token');
     if (!token) return;
     if (location?.pathname.includes('/login') || location?.pathname.includes('/signup')) return;
@@ -150,11 +148,10 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setMyIssuesLoading(false);
     }
-  }, [isMock, location?.pathname]);
+  }, [location?.pathname]);
 
   // Fetch one page of Previous Issues from the backend.
   const refreshPreviousIssues = useCallback(async (page: number = 1) => {
-    if (isMock) return;
     const token = localStorage.getItem('resolvehub_auth_token');
     if (!token) return;
     if (location?.pathname.includes('/login') || location?.pathname.includes('/signup')) return;
@@ -186,7 +183,7 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setPreviousIssuesLoading(false);
     }
-  }, [isMock, location?.pathname]);
+  }, [location?.pathname]);
 
   // Combined refresh
   const refreshIssues = useCallback(async () => {
@@ -232,59 +229,28 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [discussions, isAuthenticated]);
 
   const addIssue = async (data: AddIssueInput): Promise<Issue> => {
-    const chosenShift = data.shift || 'Shift-A';
-    const shortDesc =
-      data.description.length > 85 ? `${data.description.substring(0, 85)}...` : data.description;
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Live backend creation
-    if (!isMock) {
-      const apiRes = await apiCreateIssue({
-        projectId: data.projectId,
-        title: data.title,
-        description: data.description,
-        issueType: data.issueType,
-        occurrenceTime: data.occurrenceTime,
-        shift: chosenShift,
-        status: (data.status as IssueStatus) || 'Open',
-        priority: data.priority || 'P2 – Moderate',
-        rca: data.rca,
-        assignedTo: data.assignedTo,
-        assignedToId: data.assignedToId,
-        reportedById: currentUser?.employeeId || currentUser?.id,
-        reportedBy: currentUser?.name
-      });
-
-      if (apiRes.success && apiRes.data) {
-        setMyIssues((prev) => [apiRes.data!, ...prev]);
-        return apiRes.data;
-      }
-    }
-
-    // Fallback for local state
-    const newId = `ISS-${Date.now().toString().slice(-4)}`;
-    const newIssue: Issue = {
-      id: newId,
+    const apiRes = await apiCreateIssue({
       projectId: data.projectId,
       title: data.title,
-      shortDescription: shortDesc,
       description: data.description,
       issueType: data.issueType,
       occurrenceTime: data.occurrenceTime,
-      shift: chosenShift,
+      shift: data.shift,
       status: (data.status as IssueStatus) || 'Open',
       priority: data.priority || 'P2 – Moderate',
       rca: data.rca,
-      acceptedDeveloper: data.assignedTo || 'Unassigned',
-      acceptedDeveloperId: data.assignedToId,
-      reportedBy: currentUser?.name || 'User',
-      reportedById: currentUser?.employeeId || currentUser?.id || 'EMP',
-      reportedDate: todayStr,
-      isEligibleForDelete: true
-    };
+      assignedTo: data.assignedTo,
+      assignedToId: data.assignedToId,
+      reportedById: currentUser?.employeeId || currentUser?.id,
+      reportedBy: currentUser?.name
+    });
 
-    setMyIssues((prev) => [newIssue, ...prev]);
-    return newIssue;
+    if (!apiRes.success || !apiRes.data) {
+      throw new Error(apiRes.message || 'Failed to create issue on server.');
+    }
+
+    setMyIssues((prev) => [apiRes.data!, ...prev]);
+    return apiRes.data;
   };
 
   const updateIssue = async (
@@ -292,14 +258,17 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     updatedFields: Partial<Issue>,
     source?: 'my-issues' | 'previous-issues'
   ) => {
-    if (!isMock) {
-      await apiUpdateIssue(id, updatedFields, source);
+    const res = await apiUpdateIssue(id, updatedFields, source);
+    if (!res.success) {
+      throw new Error(res.message || 'Failed to update issue on server.');
     }
+
+    const merged = res.data ? res.data : updatedFields;
     setMyIssues((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
+      prev.map((item) => (item.id === id ? { ...item, ...merged } : item))
     );
     setPreviousIssues((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
+      prev.map((item) => (item.id === id ? { ...item, ...merged } : item))
     );
   };
 
@@ -307,8 +276,9 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     id: string,
     source?: 'my-issues' | 'previous-issues'
   ): Promise<boolean> => {
-    if (!isMock) {
-      await apiDeleteIssue(id, source);
+    const res = await apiDeleteIssue(id, source);
+    if (!res.success) {
+      return false;
     }
 
     setMyIssues((prev) => prev.filter((i) => i.id !== id));
@@ -319,36 +289,20 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addDiscussionMessage = async (issueId: string, text: string) => {
     if (!text.trim()) return;
 
-    if (!isMock) {
-      const apiRes = await apiSendMessage(
-        issueId,
-        text.trim(),
-        currentUser?.id || currentUser?.employeeId,
-        currentUser?.name
-      );
-
-      if (apiRes.success && apiRes.message) {
-        setDiscussions((prev) => ({
-          ...prev,
-          [issueId]: [...(prev[issueId] || []), apiRes.message!]
-        }));
-        return;
-      }
-    }
-
-    const newMsg: DiscussionMessage = {
-      id: `msg-${Date.now()}`,
+    const apiRes = await apiSendMessage(
       issueId,
-      senderId: currentUser?.employeeId || currentUser?.id || '',
-      senderName: currentUser?.name || 'User',
-      senderRole: (currentUser?.role as 'Support' | 'Supporter' | 'Developer') || 'Support',
-      message: text.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+      text.trim(),
+      currentUser?.id || currentUser?.employeeId,
+      currentUser?.name
+    );
+
+    if (!apiRes.success || !apiRes.message) {
+      throw new Error(apiRes.error || 'Failed to send message.');
+    }
 
     setDiscussions((prev) => ({
       ...prev,
-      [issueId]: [...(prev[issueId] || []), newMsg]
+      [issueId]: [...(prev[issueId] || []), apiRes.message!]
     }));
   };
 
@@ -360,7 +314,7 @@ export const IssueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const getDiscussion = (issueId: string): DiscussionMessage[] => {
-    if (!discussions[issueId] && !isMock) {
+    if (!discussions[issueId]) {
       apiFetchMessages(issueId).then((msgs) => {
         if (msgs.length > 0) {
           setDiscussions((prev) => ({ ...prev, [issueId]: msgs }));

@@ -1,17 +1,23 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useIssues } from '../../context/IssueContext';
 import { useAuth } from '../../context/AuthContext';
-import { Issue, DiscussionMessage } from '../../types/issue';
-import { apiFetchIssueById, apiFetchMessages, apiSendMessage, apiUpdateMessage } from '../../services/api/issueService';
+import { Issue, DiscussionMessage, ProjectItem, DeveloperItem } from '../../types/issue';
+import {
+  apiFetchIssueById,
+  apiFetchMessagesWithStatus,
+  apiSendMessage,
+  apiUpdateMessage,
+  apiFetchProjects,
+  apiFetchDevelopers
+} from '../../services/api/issueService';
 import { useIssueMessagesWebSocket } from '../../hooks/useIssueMessagesWebSocket';
+import {
+  IssueCollaborationThread,
+  isWithinEditWindow
+} from '../../components/issues/IssueCollaborationThread';
 
-const PROJECT_OPTIONS = [
-  'Nokia Production Dashboard',
-  'Manufacturing Analytics',
-  'Inventory Monitoring',
-  'Network Monitoring'
-];
+const SHIFT_OPTIONS = ['Shift-A', 'Shift-B', 'Shift-C', 'General'];
 
 const ISSUE_TYPE_OPTIONS = [
   'Front-end',
@@ -21,47 +27,59 @@ const ISSUE_TYPE_OPTIONS = [
   'Others'
 ];
 
-const DEFAULT_THREAD_MESSAGES: DiscussionMessage[] = [
-  {
-    id: 'msg-seed-1',
-    issueId: '',
-    senderId: '38',
-    senderName: 'Sivabalan',
-    senderRole: 'Supporter',
-    message: "Can you please check this issue? It's blocking the manufacturing dashboard.",
-    markdown: "Can you please check this issue? It's blocking the manufacturing dashboard.",
-    timestamp: 'Nov 17, 2026 • 04:20 PM',
-    createdAt: '2026-11-17T16:20:00Z',
-    attachment: {
-      name: 'dashboard_error.log',
-      size: '245 KB',
-      url: '#'
-    }
-  },
-  {
-    id: 'msg-seed-2',
-    issueId: '',
-    senderId: '42',
-    senderName: 'jeva',
-    senderRole: 'Developer',
-    message: "Sure, I'm looking into it. Will update you shortly.",
-    markdown: "Sure, I'm looking into it. Will update you shortly.",
-    timestamp: 'Nov 17, 2026 • 04:32 PM',
-    createdAt: '2026-11-17T16:32:00Z',
-    reaction: '👍 1'
-  },
-  {
-    id: 'msg-seed-3',
-    issueId: '',
-    senderId: '38',
-    senderName: 'Sivabalan',
-    senderRole: 'Supporter',
-    message: 'Thanks! Let me know if you need any logs. 😊',
-    markdown: 'Thanks! Let me know if you need any logs. 😊',
-    timestamp: 'Nov 17, 2026 • 04:36 PM',
-    createdAt: new Date(Date.now() - 4 * 60 * 1000).toISOString()
-  }
+const ISSUE_STATUS_OPTIONS = [
+  'Open',
+  'In progress',
+  'Pending',
+  'On Hold',
+  'Escalated',
+  'Resolved'
 ];
+
+const ISSUE_PRIORITY_OPTIONS = [
+  'P0 – Critical',
+  'P1 – High',
+  'P2 – Moderate',
+  'P3 – Low',
+  'P4 – Negligible'
+];
+
+function normalizeShiftForSelect(rawShift?: string): string {
+  const val = String(rawShift || '').trim();
+  if (!val) return '';
+  const upper = val.toUpperCase();
+  if (upper === 'A' || upper === 'SHIFT-A' || upper === 'SHIFT A') return 'Shift-A';
+  if (upper === 'B' || upper === 'SHIFT-B' || upper === 'SHIFT B') return 'Shift-B';
+  if (upper === 'C' || upper === 'SHIFT-C' || upper === 'SHIFT C') return 'Shift-C';
+  if (upper === 'GENERAL') return 'General';
+  return val;
+}
+
+function normalizeIssueTypeForSelect(rawType?: string): string {
+  const val = String(rawType || '').trim();
+  if (!val) return '';
+  const upper = val.toUpperCase();
+  if (upper === 'FRONTEND' || upper === 'FRONT-END') return 'Front-end';
+  if (upper === 'BACKEND') return 'Backend';
+  if (upper === 'DATABASE') return 'Database';
+  if (upper === 'HARDWARE') return 'Hardware';
+  if (upper === 'OTHERS') return 'Others';
+  return val;
+}
+
+function toDateTimeLocalValue(raw?: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const parsed = new Date(trimmed);
+  if (isNaN(parsed.getTime())) {
+    return '';
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
 
 export const IssueDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -84,16 +102,6 @@ export const IssueDetailsPage: React.FC = () => {
       ? 'previous-issues'
       : 'my-issues';
 
-  const backLabel =
-    fromState === 'previous-issues'
-      ? 'Previous Issues'
-      : fromState === 'developer-assigned'
-        ? 'Assigned Issues'
-        : fromState === 'developer-all'
-          ? 'All Issues'
-          : isDevUser
-            ? 'Assigned Issues'
-            : 'My Issues';
   const backPath =
     fromState === 'previous-issues'
       ? '/support/previous-issues'
@@ -111,32 +119,129 @@ export const IssueDetailsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(!initialIssue);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Edit Mode state
+  // Dynamic dropdown lists from existing APIs
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [developers, setDevelopers] = useState<DeveloperItem[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState<boolean>(false);
+  const [isLoadingDevelopers, setIsLoadingDevelopers] = useState<boolean>(false);
+  const [optionsError, setOptionsError] = useState<string>('');
+
+  // Edit Mode state (covers all 10 Create Issue fields)
   const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [editTitle, setEditTitle] = useState<string>(initialIssue?.title || '');
-  const [editProject, setEditProject] = useState<string>(initialIssue?.projectId || PROJECT_OPTIONS[0]);
-  const [editType, setEditType] = useState<string>(initialIssue?.issueType || ISSUE_TYPE_OPTIONS[0]);
-  const [editDesc, setEditDesc] = useState<string>(initialIssue?.description || '');
-  const [editOccurrence, setEditOccurrence] = useState<string>(initialIssue?.occurrenceTime || '');
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [editProject, setEditProject] = useState<string>('');
+  const [editShift, setEditShift] = useState<string>('');
+  const [editOccurrence, setEditOccurrence] = useState<string>('');
+  const [editTitle, setEditTitle] = useState<string>('');
+  const [editDesc, setEditDesc] = useState<string>('');
+  const [editType, setEditType] = useState<string>('');
+  const [editRca, setEditRca] = useState<string>('');
+  const [editStatus, setEditStatus] = useState<string>('');
+  const [editPriority, setEditPriority] = useState<string>('');
+  const [editAssignedTo, setEditAssignedTo] = useState<string>('Unassigned');
+  const [editAssignedToId, setEditAssignedToId] = useState<string>('');
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string>('');
+  const [deleteError, setDeleteError] = useState<string>('');
 
-  // Discussion state - initialized with reference thread messages
-  const [messages, setMessages] = useState<DiscussionMessage[]>(() =>
-    DEFAULT_THREAD_MESSAGES.map((m) => ({ ...m, issueId: id || '' }))
-  );
+  // Discussion state (no hardcoded seed messages)
+  const [messages, setMessages] = useState<DiscussionMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState<boolean>(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
 
-  // Message Editing state (15-minute edit window)
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState<string>('');
-  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
-  const [editMessageError, setEditMessageError] = useState<string | null>(null);
+  const populateEditFormFromIssue = useCallback(
+    (target: Issue, projectList: ProjectItem[], devList: DeveloperItem[]) => {
+      // Match Project by ID or Name
+      const matchedProj = projectList.find(
+        (p) =>
+          String(p.id) === String(target.projectId) ||
+          p.name === target.projectName ||
+          p.name === target.projectId
+      );
+      setEditProject(
+        matchedProj
+          ? String(matchedProj.id || matchedProj.name)
+          : String(target.projectId || target.projectName || '')
+      );
+
+      setEditShift(normalizeShiftForSelect(target.shift));
+      setEditOccurrence(toDateTimeLocalValue(target.occurrenceTime));
+      setEditTitle(target.title || '');
+      setEditDesc(target.description || '');
+      setEditType(normalizeIssueTypeForSelect(target.issueType));
+      setEditRca(target.rca || '');
+      setEditStatus(target.status || '');
+      setEditPriority(target.priority || '');
+
+      // Match Developer by ID, Employee ID, or Name
+      const targetDevId = target.acceptedDeveloperId || target.assignedToId;
+      const targetDevName = target.acceptedDeveloper || target.assignedTo;
+      if (!targetDevName || targetDevName === 'Unassigned') {
+        setEditAssignedTo('Unassigned');
+        setEditAssignedToId(targetDevId ? String(targetDevId) : '');
+      } else {
+        const matchedDev = devList.find(
+          (d) =>
+            (targetDevId && (String(d.id) === String(targetDevId) || d.employeeId === String(targetDevId))) ||
+            d.name === targetDevName
+        );
+        if (matchedDev) {
+          setEditAssignedTo(matchedDev.name);
+          setEditAssignedToId(String(matchedDev.id));
+        } else {
+          setEditAssignedTo(targetDevName);
+          setEditAssignedToId(targetDevId ? String(targetDevId) : '');
+        }
+      }
+      setEditErrors({});
+    },
+    []
+  );
+
+  // Fetch Projects & Developers via existing cached APIs
+  const loadDropdownOptions = useCallback(async () => {
+    setIsLoadingProjects(true);
+    setIsLoadingDevelopers(true);
+    setOptionsError('');
+
+    const [projRes, devRes] = await Promise.all([
+      apiFetchProjects(),
+      apiFetchDevelopers('developer')
+    ]);
+
+    const errs: string[] = [];
+    if (projRes.success) {
+      setProjects(projRes.data);
+    } else {
+      setProjects([]);
+      errs.push(projRes.message || 'Failed to load projects.');
+    }
+    setIsLoadingProjects(false);
+
+    if (devRes.success) {
+      setDevelopers(devRes.data);
+    } else {
+      setDevelopers([]);
+      errs.push(devRes.message || 'Failed to load developers.');
+    }
+    setIsLoadingDevelopers(false);
+
+    if (errs.length > 0) {
+      setOptionsError(errs.join(' '));
+    }
+
+    return {
+      projects: projRes.success ? projRes.data : [],
+      developers: devRes.success ? devRes.data : []
+    };
+  }, []);
 
   // 1. Fetch live issue details from backend API on mount / ID change
-  const fetchLiveIssue = async () => {
+  const fetchLiveIssue = useCallback(async () => {
     if (!id) return;
     setIsLoading(true);
     setFetchError(null);
@@ -144,108 +249,223 @@ export const IssueDetailsPage: React.FC = () => {
     const res = await apiFetchIssueById(id, sourceHint);
     if (res.success && res.data) {
       setIssue(res.data);
-      setEditTitle(res.data.title);
-      setEditProject(res.data.projectId);
-      setEditType(res.data.issueType);
-      setEditDesc(res.data.description);
-      setEditOccurrence(res.data.occurrenceTime);
-    } else if (!issue) {
-      // Check context one more time
+      populateEditFormFromIssue(res.data, projects, developers);
+    } else {
       const cached = getIssueById(id);
       if (cached) {
         setIssue(cached);
-        setEditTitle(cached.title);
-        setEditProject(cached.projectId);
-        setEditType(cached.issueType);
-        setEditDesc(cached.description);
-        setEditOccurrence(cached.occurrenceTime);
+        populateEditFormFromIssue(cached, projects, developers);
       } else {
         setFetchError(res.message || `Issue #${id} could not be found on server.`);
       }
     }
     setIsLoading(false);
-  };
+  }, [id, sourceHint, getIssueById, populateEditFormFromIssue, projects, developers]);
 
   // 2. Fetch live messages from backend API
-  const fetchLiveMessages = async () => {
+  const fetchLiveMessages = useCallback(async () => {
     if (!id) return;
-    const msgs = await apiFetchMessages(id);
-    if (msgs && msgs.length > 0) {
-      setMessages(msgs);
-    } else {
-      setMessages(DEFAULT_THREAD_MESSAGES.map((m) => ({ ...m, issueId: id })));
-    }
-  };
+    setMessagesLoading(true);
+    setMessagesError(null);
+    const res = await apiFetchMessagesWithStatus(id);
+    setMessagesLoading(false);
 
-  useEffect(() => {
-    fetchLiveIssue();
-    fetchLiveMessages();
+    if (res.success) {
+      setMessages(res.data);
+    } else {
+      setMessages([]);
+      setMessagesError(res.message || 'Unable to load discussion messages.');
+    }
   }, [id]);
 
-  // 3. Real-time WebSocket & Cross-Tab Synchronization
-  const { broadcastMessage } = useIssueMessagesWebSocket({
-    issueId: id,
+  // Initial load on mount / id change
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const opts = await loadDropdownOptions();
+      if (!active || !id) return;
+
+      setIsLoading(true);
+      setFetchError(null);
+      const res = await apiFetchIssueById(id, sourceHint);
+      if (!active) return;
+
+      if (res.success && res.data) {
+        setIssue(res.data);
+        populateEditFormFromIssue(res.data, opts.projects, opts.developers);
+      } else {
+        const cached = getIssueById(id);
+        if (cached) {
+          setIssue(cached);
+          populateEditFormFromIssue(cached, opts.projects, opts.developers);
+        } else {
+          setFetchError(res.message || `Issue #${id} could not be found on server.`);
+        }
+      }
+      setIsLoading(false);
+    })();
+
+    fetchLiveMessages();
+
+    return () => {
+      active = false;
+    };
+  }, [id, sourceHint]);
+
+  // 3. Real-time Message WebSocket (connect once resolved issue UUID is ready to avoid duplicate hits)
+  const resolvedIssueId = issue?.id;
+  const { isConnected: isMessagesWsConnected, broadcastMessage } = useIssueMessagesWebSocket({
+    issueId: resolvedIssueId,
+    enabled: Boolean(resolvedIssueId),
     onNewMessage: (newMsg) => {
       setMessages((prev) => {
-        if (prev.some((m) => m.id === newMsg.id)) return prev;
+        const existingIdx = prev.findIndex((m) => m.id === newMsg.id);
+        if (existingIdx !== -1) {
+          const existing = prev[existingIdx];
+          if (
+            existing.markdown === newMsg.markdown &&
+            existing.message === newMsg.message &&
+            existing.isEdited === newMsg.isEdited &&
+            existing.updatedAt === newMsg.updatedAt
+          ) {
+            return prev;
+          }
+          const next = [...prev];
+          next[existingIdx] = { ...existing, ...newMsg };
+          return next;
+        }
         return [...prev, newMsg];
       });
     },
+    onMessageUpdated: (updatedMsg) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg, isEdited: true } : m))
+      );
+    },
     onMessagesUpdated: (allMsgs) => {
       if (allMsgs && allMsgs.length > 0) {
-        setMessages(allMsgs);
+        setMessages((prev) => {
+          const pendingOptimistic = prev.filter((m) => m.id.startsWith('temp-'));
+          const deduped = [...allMsgs];
+          pendingOptimistic.forEach((opt) => {
+            if (!deduped.some((m) => m.id === opt.id)) {
+              deduped.push(opt);
+            }
+          });
+          return deduped;
+        });
       }
     }
   });
 
-  // Scroll chat to bottom when messages update
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
-
   const handleBack = () => {
-    navigate(backPath);
+    const historyIdx = typeof window !== 'undefined' ? (window.history.state as { idx?: number } | null)?.idx : undefined;
+    if (typeof historyIdx === 'number' && historyIdx > 0) {
+      navigate(-1);
+    } else {
+      navigate(isDevUser ? '/developer/assigned' : '/support/my-issues');
+    }
+  };
+
+  const handleOpenEdit = async () => {
+    setSaveError('');
+    setEditErrors({});
+    if (issue) {
+      populateEditFormFromIssue(issue, projects, developers);
+    }
+    setIsEditing(true);
+    if (projects.length === 0 || developers.length === 0) {
+      const opts = await loadDropdownOptions();
+      if (issue) {
+        populateEditFormFromIssue(issue, opts.projects, opts.developers);
+      }
+    }
+  };
+
+  const handleDeveloperChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setEditAssignedTo(val);
+    if (val === 'Unassigned') {
+      setEditAssignedToId('');
+      return;
+    }
+    const found = developers.find((d) => d.name === val || String(d.id) === val);
+    setEditAssignedToId(found ? String(found.id) : '');
+  };
+
+  const validateEditForm = (): Record<string, string> => {
+    const errs: Record<string, string> = {};
+    if (!editProject.trim()) errs.projectId = 'Project selection is mandatory.';
+    if (!editShift.trim()) errs.shift = 'Shift is mandatory.';
+    if (!editOccurrence.trim()) errs.occurrenceTime = 'Occurrence time is mandatory.';
+    if (!editTitle.trim()) {
+      errs.title = 'Issue Title is mandatory.';
+    } else if (editTitle.trim().length > 100) {
+      errs.title = 'Issue Title cannot exceed 100 characters.';
+    }
+    if (!editDesc.trim()) {
+      errs.description = 'Issue Details are mandatory.';
+    } else if (editDesc.trim().length > 1000) {
+      errs.description = 'Issue Details cannot exceed 1000 characters.';
+    }
+    if (!editType.trim()) errs.issueType = 'Issue Type is mandatory.';
+    if (!editStatus.trim()) errs.status = 'Issue Status is mandatory.';
+    if (!editPriority.trim()) errs.priority = 'Issue Priority is mandatory.';
+    if (editRca.length > 1000) errs.rca = 'RCA cannot exceed 1000 characters.';
+    return errs;
   };
 
   // Handle Edit Submit
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!issue) return;
-    if (!editTitle.trim() || !editDesc.trim()) return;
 
     setSaveError('');
+    const errs = validateEditForm();
+    if (Object.keys(errs).length > 0) {
+      setEditErrors(errs);
+      return;
+    }
+
+    setEditErrors({});
+    setIsSaving(true);
+
     try {
+      const selectedProjectObj = projects.find(
+        (p) => String(p.id || p.name) === editProject || p.name === editProject
+      );
+
       await updateIssue(
         issue.id,
         {
-          title: editTitle.trim(),
           projectId: editProject,
-          issueType: editType,
+          projectName: selectedProjectObj?.name || editProject,
+          shift: editShift,
+          occurrenceTime: editOccurrence,
+          title: editTitle.trim(),
           description: editDesc.trim(),
-          shortDescription: editDesc.length > 85 ? `${editDesc.substring(0, 85)}...` : editDesc,
-          occurrenceTime: editOccurrence
+          shortDescription: editDesc.trim().length > 85 ? `${editDesc.trim().substring(0, 85)}...` : editDesc.trim(),
+          issueType: editType,
+          rca: editRca.trim(),
+          status: editStatus as Issue['status'],
+          priority: editPriority,
+          assignedTo: editAssignedTo,
+          acceptedDeveloper: editAssignedTo,
+          assignedToId: editAssignedTo === 'Unassigned' ? '' : editAssignedToId,
+          acceptedDeveloperId: editAssignedTo === 'Unassigned' ? '' : editAssignedToId
         },
         sourceHint
       );
 
-      setIssue((prev) =>
-        prev
-          ? {
-            ...prev,
-            title: editTitle.trim(),
-            projectId: editProject,
-            issueType: editType,
-            description: editDesc.trim(),
-            occurrenceTime: editOccurrence
-          }
-          : undefined
-      );
-
+      // Refresh displayed issue information directly from backend after successful update
+      await fetchLiveIssue();
       setIsEditing(false);
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => setSaveSuccess(false), 3500);
     } catch (err: any) {
-      setSaveError(err.message || 'Failed to save changes.');
+      setSaveError(err?.message || 'Failed to save changes on server.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -256,19 +476,22 @@ export const IssueDetailsPage: React.FC = () => {
 
     const text = messageText.trim();
     setMessageText('');
+    setSendError(null);
     setIsSending(true);
 
-    const isDeveloper = String(currentUser?.role || '').toLowerCase().includes('dev');
-    const senderRole = isDeveloper ? 'Developer' : 'Supporter';
-
+    const senderRole = currentUser?.role || '';
     const now = new Date();
-    const formattedTimestamp = `${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} • ${now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
+    const formattedTimestamp = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
 
     const optimisticMsg: DiscussionMessage = {
       id: `temp-${Date.now()}`,
       issueId: id,
-      senderId: String(currentUser?.id || '38'),
-      senderName: currentUser?.name || 'Sivabalan',
+      senderId: String(currentUser?.id || currentUser?.employeeId || ''),
+      senderName: currentUser?.name || 'Unknown User',
       senderRole,
       message: text,
       markdown: text,
@@ -276,118 +499,100 @@ export const IssueDetailsPage: React.FC = () => {
       timestamp: formattedTimestamp
     };
 
-    // Immediately display optimistic message in UI
     setMessages((prev) => [...prev, optimisticMsg]);
-    // Real-time broadcast to other tabs/windows and active WebSocket immediately
-    broadcastMessage(optimisticMsg);
 
     try {
-      const res = await apiSendMessage(id, text, currentUser?.id, currentUser?.name);
+      const targetIssueId = resolvedIssueId || id;
+      const res = await apiSendMessage(
+        targetIssueId,
+        text,
+        currentUser?.id || currentUser?.employeeId,
+        currentUser?.name
+      );
+
       if (res.success && res.message) {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === optimisticMsg.id ? res.message! : m))
-        );
-        broadcastMessage(res.message);
+        const confirmedMsg = res.message;
+        setMessages((prev) => {
+          const alreadyExists = prev.some((m) => m.id === confirmedMsg.id);
+          if (alreadyExists) {
+            return prev.filter((m) => m.id !== optimisticMsg.id);
+          }
+          return prev.map((m) => (m.id === optimisticMsg.id ? confirmedMsg : m));
+        });
+        broadcastMessage(confirmedMsg, 'NEW_MESSAGE');
       } else {
-        await fetchLiveMessages();
+        // Revert optimistic message and surface API error
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
+        setMessageText(text);
+        setSendError(res.error || 'Failed to send message to server.');
       }
-    } catch (err) {
-      console.error('Failed to send message:', err);
+    } catch (err: any) {
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
+      setMessageText(text);
+      setSendError(err?.message || 'Failed to send message to server.');
     } finally {
       setIsSending(false);
     }
   };
 
-  // 15-Minute Edit Window Constants & Helpers
-  const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-
-  const getRemainingEditMinutes = useCallback((createdAt?: string): number => {
-    if (!createdAt) return 15;
-    const createdTime = new Date(createdAt).getTime();
-    if (isNaN(createdTime)) return 15;
-    const elapsed = Date.now() - createdTime;
-    const remaining = Math.max(0, EDIT_WINDOW_MS - elapsed);
-    return Math.ceil(remaining / 60000);
-  }, [EDIT_WINDOW_MS]);
-
-  const isWithin15Minutes = useCallback((createdAt?: string): boolean => {
-    if (!createdAt) return true;
-    const createdTime = new Date(createdAt).getTime();
-    if (isNaN(createdTime)) return true;
-    const elapsed = Date.now() - createdTime;
-    return elapsed >= 0 && elapsed <= EDIT_WINDOW_MS;
-  }, [EDIT_WINDOW_MS]);
-
-  const checkIsSender = useCallback((msg: DiscussionMessage): boolean => {
-    if (currentUser) {
-      if (currentUser.id && String(msg.senderId) === String(currentUser.id)) return true;
-      if (currentUser.employeeId && String(msg.senderId) === String(currentUser.employeeId)) return true;
-      if (currentUser.name && msg.senderName?.trim().toLowerCase() === currentUser.name?.trim().toLowerCase()) return true;
+  // Handle Edit Message (enforces 15-minute window and updates via backend API)
+  const handleEditMessage = async (
+    messageId: string,
+    updatedText: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const targetIssueId = resolvedIssueId || id;
+    if (!targetIssueId) {
+      return { success: false, error: 'Missing issue identifier.' };
     }
-    if (isDevUser) {
-      return Boolean(msg.senderRole?.toLowerCase().includes('dev') || msg.senderName?.toLowerCase().includes('jeva'));
-    }
-    return Boolean(msg.senderRole?.toLowerCase().includes('supp') || msg.senderName?.toLowerCase().includes('sivabalan'));
-  }, [currentUser, isDevUser]);
 
-  const handleStartEdit = (msg: DiscussionMessage) => {
-    setEditingMessageId(msg.id);
-    setEditingText(msg.markdown || msg.message || '');
-    setEditMessageError(null);
+    const targetMsg = messages.find((m) => m.id === messageId);
+    if (!targetMsg || !targetMsg.createdAt) {
+      return { success: false, error: 'Message creation timestamp unavailable.' };
+    }
+
+    if (!isWithinEditWindow(targetMsg.createdAt)) {
+      return { success: false, error: 'The 15-minute editing window has expired.' };
+    }
+
+    const res = await apiUpdateMessage(targetIssueId, messageId, updatedText);
+    if (!res.success) {
+      return { success: false, error: res.error || 'Failed to update message on server.' };
+    }
+
+    if (res.message) {
+      const updatedMsg: DiscussionMessage = {
+        ...targetMsg,
+        ...res.message,
+        message: res.message.markdown || updatedText,
+        markdown: res.message.markdown || updatedText,
+        isEdited: true
+      };
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? updatedMsg : m)));
+      broadcastMessage(updatedMsg, 'MESSAGE_UPDATED');
+    } else {
+      await fetchLiveMessages();
+      const updatedMsg: DiscussionMessage = {
+        ...targetMsg,
+        message: updatedText,
+        markdown: updatedText,
+        updatedAt: new Date().toISOString(),
+        isEdited: true
+      };
+      broadcastMessage(updatedMsg, 'MESSAGE_UPDATED');
+    }
+    return { success: true };
   };
 
-  const handleCancelEdit = () => {
-    setEditingMessageId(null);
-    setEditingText('');
-    setEditMessageError(null);
-  };
-
-  const handleSaveMessageEdit = async (msgId: string) => {
-    if (!id || !editingText.trim()) return;
-    const targetMsg = messages.find((m) => m.id === msgId);
-    if (!targetMsg) return;
-
-    if (!isWithin15Minutes(targetMsg.createdAt)) {
-      setEditMessageError('Edit window has expired. Messages can only be edited within the first 15 minutes.');
-      return;
-    }
-
-    setIsSavingEdit(true);
-    setEditMessageError(null);
-
-    const updatedContent = editingText.trim();
-    const updatedMsg: DiscussionMessage = {
-      ...targetMsg,
-      message: updatedContent,
-      markdown: updatedContent,
-      isEdited: true,
-      editedAt: new Date().toISOString()
-    };
-
-    // Optimistic UI update
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? updatedMsg : m))
-    );
-
-    // Broadcast across tabs
-    broadcastMessage(updatedMsg);
-
-    try {
-      await apiUpdateMessage(id, msgId, updatedContent);
-    } catch (err) {
-      console.error('Failed to update message on backend:', err);
-    } finally {
-      setIsSavingEdit(false);
-      setEditingMessageId(null);
-      setEditingText('');
-    }
-  };
-
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!issue) return;
+    setDeleteError('');
     if (window.confirm(`Are you sure you want to delete ${issue.issueNumber || issue.id}: "${issue.title}"?`)) {
-      deleteIssue(issue.id, sourceHint);
-      navigate(backPath);
+      const deleted = await deleteIssue(issue.id, sourceHint);
+      if (deleted) {
+        navigate(backPath);
+      } else {
+        setDeleteError('Failed to delete issue on server. Please try again.');
+      }
     }
   };
 
@@ -414,16 +619,16 @@ export const IssueDetailsPage: React.FC = () => {
         </div>
         <h5 className="fw-bold text-navy mb-2">Issue Not Found</h5>
         <p className="text-secondary small mb-4" style={{ maxWidth: '420px' }}>
-          {fetchError || `We couldn't locate incident ticket in your active records.`}
+          {fetchError || `We couldn't locate this incident ticket in your active records.`}
         </p>
         <button type="button" className="btn btn-primary rounded-pill px-4" onClick={handleBack}>
-          <i className="bi bi-arrow-left me-1.5"></i>Return to {backLabel}
+          <i className="bi bi-arrow-left me-1.5"></i>Back
         </button>
       </div>
     );
   }
 
-  const isEditable = issue.status === 'Open';
+  const isDeletable = issue.status === 'Open';
 
   // Safe Project Name Extraction
   const projectNameDisplay =
@@ -434,12 +639,35 @@ export const IssueDetailsPage: React.FC = () => {
         : ((issue.projectName as any)?.project_name ||
           (issue.projectId as any)?.project_name ||
           (issue.projectName as any)?.name ||
-          'Dolorem Service');
+          '—');
 
   // Priority formatting
-  const rawPriority = issue.priority || 'P2 – Moderate';
+  const rawPriority = issue.priority || '—';
   const isP0 = rawPriority.includes('P0');
   const isP1 = rawPriority.includes('P1');
+
+  // Ensure select options always contain the current issue value even if backend format varies
+  const shiftOptionsList = editShift && !SHIFT_OPTIONS.includes(editShift)
+    ? [editShift, ...SHIFT_OPTIONS]
+    : SHIFT_OPTIONS;
+  const typeOptionsList = editType && !ISSUE_TYPE_OPTIONS.includes(editType)
+    ? [editType, ...ISSUE_TYPE_OPTIONS]
+    : ISSUE_TYPE_OPTIONS;
+  const statusOptionsList = editStatus && !ISSUE_STATUS_OPTIONS.includes(editStatus)
+    ? [editStatus, ...ISSUE_STATUS_OPTIONS]
+    : ISSUE_STATUS_OPTIONS;
+  const priorityOptionsList = editPriority && !ISSUE_PRIORITY_OPTIONS.includes(editPriority)
+    ? [editPriority, ...ISSUE_PRIORITY_OPTIONS]
+    : ISSUE_PRIORITY_OPTIONS;
+
+  const hasCurrentProjectOption =
+    !editProject ||
+    projects.some((p) => String(p.id || p.name) === editProject || p.name === editProject);
+
+  const hasCurrentDevOption =
+    !editAssignedTo ||
+    editAssignedTo === 'Unassigned' ||
+    developers.some((d) => d.name === editAssignedTo);
 
   return (
     <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '0.85rem' }}>
@@ -456,10 +684,9 @@ export const IssueDetailsPage: React.FC = () => {
               onClick={handleBack}
             >
               <i className="bi bi-arrow-left"></i>
-              <span>Back to {backLabel}</span>
+              <span>Back</span>
             </button>
 
-            {/* Solid Vivid Blue Pill Badge for Ticket Number */}
             <span
               className="badge bg-primary px-3 py-1.5 rounded-pill fw-bold text-white shadow-2xs"
               style={{ fontSize: '0.82rem', letterSpacing: '0.2px' }}
@@ -467,21 +694,21 @@ export const IssueDetailsPage: React.FC = () => {
               {issue.issueNumber || issue.id}
             </span>
 
-            {/* Amber Status Pill Badge */}
-            <span
-              className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
-              style={{
-                backgroundColor: '#fff7ed',
-                color: '#ea580c',
-                border: '1px solid #fed7aa',
-                fontSize: '0.78rem'
-              }}
-            >
-              <i className="bi bi-record-circle"></i>
-              {issue.status}
-            </span>
+            {issue.status && (
+              <span
+                className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
+                style={{
+                  backgroundColor: '#fff7ed',
+                  color: '#ea580c',
+                  border: '1px solid #fed7aa',
+                  fontSize: '0.78rem'
+                }}
+              >
+                <i className="bi bi-record-circle"></i>
+                {issue.status}
+              </span>
+            )}
 
-            {/* Soft Blue / Priority Pill Badge */}
             <span
               className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
               style={{
@@ -495,7 +722,6 @@ export const IssueDetailsPage: React.FC = () => {
               {rawPriority}
             </span>
 
-            {/* Soft Blue / Operational Shift Pill Badge */}
             <span
               className="badge rounded-pill px-3 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
               style={{
@@ -506,7 +732,7 @@ export const IssueDetailsPage: React.FC = () => {
               }}
             >
               <i className="bi bi-info-circle"></i>
-              {issue.shift || 'Shift-B'}
+              {issue.shift || '—'}
             </span>
           </div>
 
@@ -525,18 +751,18 @@ export const IssueDetailsPage: React.FC = () => {
               <span className="d-none d-md-inline">Refresh</span>
             </button>
 
-            {isEditable && !isEditing && (
+            {!isEditing && (
               <button
                 type="button"
                 className="btn btn-outline-primary rounded-pill px-3 py-1.5 small fw-semibold shadow-2xs d-inline-flex align-items-center gap-1.5"
-                onClick={() => setIsEditing(true)}
+                onClick={handleOpenEdit}
               >
                 <i className="bi bi-pencil-square"></i>
                 <span>Edit Issue</span>
               </button>
             )}
 
-            {isEditable && (
+            {isDeletable && (
               <button
                 type="button"
                 className="btn btn-outline-danger rounded-pill px-3 py-1.5 small fw-semibold shadow-2xs d-inline-flex align-items-center gap-1.5"
@@ -552,7 +778,7 @@ export const IssueDetailsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Notifications for updates */}
+      {/* Notifications for updates / errors */}
       {saveSuccess && (
         <div className="alert alert-success py-2 px-3 small rounded-3 d-flex align-items-center justify-content-between shadow-xs flex-shrink-0 mb-0">
           <div className="d-flex align-items-center gap-2">
@@ -563,13 +789,20 @@ export const IssueDetailsPage: React.FC = () => {
         </div>
       )}
 
-      {saveError && (
+      {(saveError || deleteError) && (
         <div className="alert alert-danger py-2 px-3 small rounded-3 d-flex align-items-center justify-content-between shadow-xs flex-shrink-0 mb-0">
           <div className="d-flex align-items-center gap-2">
             <i className="bi bi-exclamation-triangle-fill text-danger fs-5"></i>
-            <span>{saveError}</span>
+            <span>{saveError || deleteError}</span>
           </div>
-          <button type="button" className="btn-close btn-close-sm" onClick={() => setSaveError('')}></button>
+          <button
+            type="button"
+            className="btn-close btn-close-sm"
+            onClick={() => {
+              setSaveError('');
+              setDeleteError('');
+            }}
+          ></button>
         </div>
       )}
 
@@ -577,14 +810,14 @@ export const IssueDetailsPage: React.FC = () => {
       <div className="flex-grow-1 min-h-0 overflow-y-auto overflow-lg-hidden">
         <div className="row g-3 h-100 min-h-0 details-split-container">
 
-          {/* ================= LEFT COLUMN (~59%): INCIDENT OVERVIEW & SECTIONS ================= */}
+          {/* ================= LEFT COLUMN (~59%): INCIDENT OVERVIEW & FULL EDIT FORM ================= */}
           <div className="col-12 col-lg-7 d-flex flex-column details-column h-100 min-h-0">
             <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
               <div className="p-3.5 p-xl-4 overflow-y-auto flex-grow-1">
 
                 {isEditing ? (
-                  /* ================= INLINE EDIT MODE ================= */
-                  <form onSubmit={handleSaveEdit}>
+                  /* ================= COMPLETE EDIT MODE (ALL 10 CREATE ISSUE FIELDS) ================= */
+                  <form onSubmit={handleSaveEdit} noValidate>
                     <div className="d-flex align-items-center justify-content-between pb-2 mb-3 border-bottom">
                       <h6 className="fw-bold text-navy mb-0 d-flex align-items-center gap-2">
                         <i className="bi bi-pencil-square text-primary"></i>
@@ -593,122 +826,353 @@ export const IssueDetailsPage: React.FC = () => {
                       <button
                         type="button"
                         className="btn btn-sm btn-link text-secondary text-decoration-none p-0"
-                        onClick={() => setIsEditing(false)}
+                        onClick={() => {
+                          setIsEditing(false);
+                          setSaveError('');
+                        }}
+                        disabled={isSaving}
                       >
                         Cancel
                       </button>
                     </div>
 
-                    <div className="mb-3">
-                      <label className="form-label small fw-semibold text-secondary mb-1">Incident Title *</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        required
-                        maxLength={100}
-                      />
-                    </div>
+                    {optionsError && (
+                      <div className="alert alert-warning py-2 px-3 small rounded-3 d-flex align-items-center justify-content-between mb-3">
+                        <span>{optionsError}</span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-dark py-0 px-2"
+                          onClick={loadDropdownOptions}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
 
+                    {/* Row 1: 1. Project & 2. Shift */}
                     <div className="row g-3 mb-3">
-                      <div className="col-12 col-sm-6">
-                        <label className="form-label small fw-semibold text-secondary mb-1">Target Project</label>
+                      <div className="col-12 col-md-6">
+                        <div className="d-flex align-items-center justify-content-between mb-1">
+                          <label className="form-label small fw-semibold text-navy mb-0">
+                            Project <span className="text-danger">*</span>
+                          </label>
+                          {isLoadingProjects && (
+                            <span className="text-muted small" style={{ fontSize: '0.72rem' }}>
+                              <span className="spinner-border spinner-border-sm me-1" style={{ width: '10px', height: '10px' }} />
+                              Loading...
+                            </span>
+                          )}
+                        </div>
                         <select
-                          className="form-select"
+                          className={`form-select form-select-sm ${editErrors.projectId ? 'is-invalid' : ''}`}
                           value={editProject}
                           onChange={(e) => setEditProject(e.target.value)}
+                          disabled={isSaving || isLoadingProjects}
                         >
-                          {PROJECT_OPTIONS.map((p) => (
-                            <option key={p} value={p}>{p}</option>
+                          <option value="">-- Select Project --</option>
+                          {!hasCurrentProjectOption && (
+                            <option value={editProject}>{projectNameDisplay || editProject}</option>
+                          )}
+                          {projects.map((p) => (
+                            <option key={String(p.id)} value={String(p.id || p.name)}>
+                              {p.name}
+                            </option>
                           ))}
                         </select>
+                        {editErrors.projectId && (
+                          <div className="invalid-feedback small">{editErrors.projectId}</div>
+                        )}
                       </div>
 
-                      <div className="col-12 col-sm-6">
-                        <label className="form-label small fw-semibold text-secondary mb-1">Issue Type</label>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small fw-semibold text-navy mb-1">
+                          Shift <span className="text-danger">*</span>
+                        </label>
                         <select
-                          className="form-select"
+                          className={`form-select form-select-sm ${editErrors.shift ? 'is-invalid' : ''}`}
+                          value={editShift}
+                          onChange={(e) => setEditShift(e.target.value)}
+                          disabled={isSaving}
+                        >
+                          <option value="">-- Select Shift --</option>
+                          {shiftOptionsList.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                        {editErrors.shift && (
+                          <div className="invalid-feedback small">{editErrors.shift}</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 2: 3. Occurrence Time & 4. Issue Type */}
+                    <div className="row g-3 mb-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small fw-semibold text-navy mb-1">
+                          Issue Occurrence Time <span className="text-danger">*</span>
+                        </label>
+                        <div className="input-group input-group-sm">
+                          <span className="input-group-text bg-light text-muted">
+                            <i className="bi bi-calendar-event"></i>
+                          </span>
+                          <input
+                            type="datetime-local"
+                            className={`form-control form-control-sm ${editErrors.occurrenceTime ? 'is-invalid' : ''}`}
+                            value={editOccurrence}
+                            onChange={(e) => setEditOccurrence(e.target.value)}
+                            disabled={isSaving}
+                          />
+                        </div>
+                        {editErrors.occurrenceTime && (
+                          <div className="text-danger small mt-1" style={{ fontSize: '0.74rem' }}>
+                            {editErrors.occurrenceTime}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small fw-semibold text-navy mb-1">
+                          Issue Type <span className="text-danger">*</span>
+                        </label>
+                        <select
+                          className={`form-select form-select-sm ${editErrors.issueType ? 'is-invalid' : ''}`}
                           value={editType}
                           onChange={(e) => setEditType(e.target.value)}
+                          disabled={isSaving}
                         >
-                          {ISSUE_TYPE_OPTIONS.map((t) => (
+                          <option value="">-- Select Issue Type --</option>
+                          {typeOptionsList.map((t) => (
                             <option key={t} value={t}>{t}</option>
                           ))}
                         </select>
+                        {editErrors.issueType && (
+                          <div className="invalid-feedback small">{editErrors.issueType}</div>
+                        )}
                       </div>
                     </div>
 
-                    <div className="mb-3">
-                      <label className="form-label small fw-semibold text-secondary mb-1">Occurrence Time</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={editOccurrence}
-                        onChange={(e) => setEditOccurrence(e.target.value)}
-                      />
+                    {/* Row 3: 5. Status, 6. Priority & 7. Assigned To */}
+                    <div className="row g-3 mb-3">
+                      <div className="col-12 col-md-4">
+                        <label className="form-label small fw-semibold text-navy mb-1">
+                          Issue Status <span className="text-danger">*</span>
+                        </label>
+                        <select
+                          className={`form-select form-select-sm ${editErrors.status ? 'is-invalid' : ''}`}
+                          value={editStatus}
+                          onChange={(e) => setEditStatus(e.target.value)}
+                          disabled={isSaving}
+                        >
+                          <option value="">-- Select Status --</option>
+                          {statusOptionsList.map((st) => (
+                            <option key={st} value={st}>{st}</option>
+                          ))}
+                        </select>
+                        {editErrors.status && (
+                          <div className="invalid-feedback small">{editErrors.status}</div>
+                        )}
+                      </div>
+
+                      <div className="col-12 col-md-4">
+                        <label className="form-label small fw-semibold text-navy mb-1">
+                          Issue Priority <span className="text-danger">*</span>
+                        </label>
+                        <select
+                          className={`form-select form-select-sm ${editErrors.priority ? 'is-invalid' : ''}`}
+                          value={editPriority}
+                          onChange={(e) => setEditPriority(e.target.value)}
+                          disabled={isSaving}
+                        >
+                          <option value="">-- Select Priority --</option>
+                          {priorityOptionsList.map((pr) => (
+                            <option key={pr} value={pr}>{pr}</option>
+                          ))}
+                        </select>
+                        {editErrors.priority && (
+                          <div className="invalid-feedback small">{editErrors.priority}</div>
+                        )}
+                      </div>
+
+                      <div className="col-12 col-md-4">
+                        <div className="d-flex align-items-center justify-content-between mb-1">
+                          <label className="form-label small fw-semibold text-navy mb-0">
+                            Assigned To
+                          </label>
+                          {isLoadingDevelopers && (
+                            <span className="text-muted small" style={{ fontSize: '0.72rem' }}>
+                              <span className="spinner-border spinner-border-sm me-1" style={{ width: '10px', height: '10px' }} />
+                              Loading...
+                            </span>
+                          )}
+                        </div>
+                        <select
+                          className="form-select form-select-sm"
+                          value={editAssignedTo}
+                          onChange={handleDeveloperChange}
+                          disabled={isSaving || isLoadingDevelopers}
+                        >
+                          <option value="Unassigned">Unassigned</option>
+                          {!hasCurrentDevOption && (
+                            <option value={editAssignedTo}>{editAssignedTo}</option>
+                          )}
+                          {developers.map((d) => (
+                            <option key={String(d.id)} value={d.name}>
+                              {d.name} {d.employeeId ? `(${d.employeeId})` : ''} {d.roleType ? `[${d.roleType}]` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
+                    {/* 8. Issue Title */}
                     <div className="mb-3">
-                      <label className="form-label small fw-semibold text-secondary mb-1">Detailed Description *</label>
+                      <div className="d-flex align-items-center justify-content-between mb-1">
+                        <label className="form-label small fw-semibold text-navy mb-0">
+                          Issue Title <span className="text-danger">*</span>
+                        </label>
+                        <span
+                          className={`small ${editTitle.length >= 100 ? 'text-danger fw-bold' : 'text-muted'}`}
+                          style={{ fontSize: '0.74rem' }}
+                        >
+                          {editTitle.length}/100
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={100}
+                        className={`form-control form-control-sm ${editErrors.title ? 'is-invalid' : ''}`}
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        disabled={isSaving}
+                      />
+                      {editErrors.title && (
+                        <div className="invalid-feedback small">{editErrors.title}</div>
+                      )}
+                    </div>
+
+                    {/* 9. Issue Details / Description */}
+                    <div className="mb-3">
+                      <div className="d-flex align-items-center justify-content-between mb-1">
+                        <label className="form-label small fw-semibold text-navy mb-0">
+                          Issue Details <span className="text-danger">*</span>
+                        </label>
+                        <span
+                          className={`small ${editDesc.length >= 1000 ? 'text-danger fw-bold' : 'text-muted'}`}
+                          style={{ fontSize: '0.74rem' }}
+                        >
+                          {editDesc.length}/1000
+                        </span>
+                      </div>
                       <textarea
-                        className="form-control"
-                        rows={6}
+                        className={`form-control form-control-sm ${editErrors.description ? 'is-invalid' : ''}`}
+                        rows={4}
+                        maxLength={1000}
                         value={editDesc}
                         onChange={(e) => setEditDesc(e.target.value)}
-                        required
+                        disabled={isSaving}
                       />
+                      {editErrors.description && (
+                        <div className="invalid-feedback small">{editErrors.description}</div>
+                      )}
+                    </div>
+
+                    {/* 10. Root Cause Analysis (RCA) */}
+                    <div className="mb-3">
+                      <div className="d-flex align-items-center justify-content-between mb-1">
+                        <label className="form-label small fw-semibold text-navy mb-0">
+                          Root Cause Analysis (RCA)
+                        </label>
+                        <span
+                          className={`small ${editRca.length >= 1000 ? 'text-danger fw-bold' : 'text-muted'}`}
+                          style={{ fontSize: '0.74rem' }}
+                        >
+                          {editRca.length}/1000
+                        </span>
+                      </div>
+                      <textarea
+                        className={`form-control form-control-sm ${editErrors.rca ? 'is-invalid' : ''}`}
+                        rows={3}
+                        maxLength={1000}
+                        placeholder="Enter root cause analysis findings (optional)..."
+                        value={editRca}
+                        onChange={(e) => setEditRca(e.target.value)}
+                        disabled={isSaving}
+                      />
+                      {editErrors.rca && (
+                        <div className="invalid-feedback small">{editErrors.rca}</div>
+                      )}
                     </div>
 
                     <div className="d-flex align-items-center justify-content-end gap-2 pt-2 border-top">
                       <button
                         type="button"
                         className="btn btn-outline-secondary btn-sm rounded-pill px-3"
-                        onClick={() => setIsEditing(false)}
+                        onClick={() => {
+                          setIsEditing(false);
+                          setSaveError('');
+                        }}
+                        disabled={isSaving}
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
                         className="btn btn-primary-action btn-sm px-4"
+                        disabled={isSaving}
                       >
-                        Save Changes
+                        {isSaving ? (
+                          <>
+                            <span className="spinner-border spinner-border-sm me-1.5" role="status" aria-hidden="true"></span>
+                            Saving...
+                          </>
+                        ) : (
+                          'Save Changes'
+                        )}
                       </button>
                     </div>
                   </form>
                 ) : (
-                  /* ================= READ-ONLY DETAILS VIEW (MATCHING APPROVED DESIGN) ================= */
+                  /* ================= READ-ONLY DETAILS VIEW ================= */
                   <div>
 
                     {/* Title & Reporter Header */}
                     <div className="mb-3 pb-2">
                       <h4 className="fw-bold text-navy mb-2 lh-sm" style={{ fontSize: '1.5rem', letterSpacing: '-0.3px' }}>
-                        {issue.title}
+                        {issue.title || 'Untitled Issue'}
                       </h4>
 
                       <div className="d-flex flex-wrap align-items-center text-secondary small" style={{ fontSize: '0.82rem' }}>
                         <span className="d-flex align-items-center gap-1.5">
                           <i className="bi bi-person text-primary"></i>
-                          Reported by <strong className="text-navy">{issue.reportedBy || 'Supporter'}{issue.reportedById ? `(${issue.reportedById})` : '(47)'}</strong>
+                          Reported by{' '}
+                          <strong className="text-navy">
+                            {issue.reportedBy || 'Unknown'}
+                            {/* {issue.reportedBy ? ` (${issue.issue_created_by_name})` : ''} */}
+                            {issue.reportedById ? ` (${issue.reportedById})` : ''}
+                          </strong>
                         </span>
-                        <span className="text-muted mx-2">|</span>
-                        <span className="d-flex align-items-center gap-1.5">
-                          <i className="bi bi-calendar3 text-muted"></i>
-                          {issue.reportedDate || '2026-11-18'}
-                        </span>
+                        {issue.reportedDate && (
+                          <>
+                            <span className="text-muted mx-2">|</span>
+                            <span className="d-flex align-items-center gap-1.5">
+                              <i className="bi bi-calendar3 text-muted"></i>
+                              {issue.reportedDate}
+                            </span>
+                          </>
+                        )}
                         {issue.occurrenceTime && (
                           <>
                             <span className="text-muted mx-2">|</span>
                             <span className="d-flex align-items-center gap-1.5">
                               <i className="bi bi-clock text-muted"></i>
-                              Time: {issue.occurrenceTime}
+                              Occurrence: {issue.occurrenceTime}
                             </span>
                           </>
                         )}
                       </div>
                     </div>
 
-                    {/* 4 Overview KPI Metric Cards in 1 Row */}
+                    {/* Overview Metric Cards */}
                     <div className="row g-2.5 mb-4">
                       {/* Card 1: Project */}
                       <div className="col-6 col-sm-3">
@@ -741,7 +1205,7 @@ export const IssueDetailsPage: React.FC = () => {
                             <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Issue Type</span>
                           </div>
                           <strong className="text-navy small d-block text-truncate fw-bold" style={{ fontSize: '0.88rem' }}>
-                            {issue.issueType || 'General'}
+                            {issue.issueType || '—'}
                           </strong>
                         </div>
                       </div>
@@ -757,12 +1221,12 @@ export const IssueDetailsPage: React.FC = () => {
                             <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Operational Shift</span>
                           </div>
                           <strong className="text-navy small d-block text-truncate fw-bold" style={{ fontSize: '0.88rem' }}>
-                            {issue.shift || 'Shift-B'}
+                            {issue.shift || '—'}
                           </strong>
                         </div>
                       </div>
 
-                      {/* Card 4: Current Status */}
+                      {/* Card 4: Current Status & Priority */}
                       <div className="col-6 col-sm-3">
                         <div
                           className="p-3 rounded-3 h-100 d-flex flex-column justify-content-between"
@@ -770,15 +1234,20 @@ export const IssueDetailsPage: React.FC = () => {
                         >
                           <div className="d-flex align-items-center gap-2 mb-2">
                             <i className="bi bi-activity fs-5" style={{ color: '#d97706' }}></i>
-                            <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Current Status</span>
+                            <span className="text-secondary small fw-medium" style={{ fontSize: '0.78rem' }}>Status & Priority</span>
                           </div>
-                          <div>
+                          <div className="d-flex flex-wrap align-items-center gap-1">
                             <span
-                              className="badge rounded-pill px-3 py-1 fw-bold"
-                              style={{ backgroundColor: '#fef3c7', color: '#b45309', fontSize: '0.78rem' }}
+                              className="badge rounded-pill px-2.5 py-1 fw-bold"
+                              style={{ backgroundColor: '#fef3c7', color: '#b45309', fontSize: '0.75rem' }}
                             >
-                              {issue.status}
+                              {issue.status || '—'}
                             </span>
+                            {issue.priority && (
+                              <span className="text-muted fw-semibold" style={{ fontSize: '0.72rem' }}>
+                                {issue.priority}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -798,10 +1267,11 @@ export const IssueDetailsPage: React.FC = () => {
                           minHeight: '80px',
                           fontSize: '0.9rem',
                           whiteSpace: 'pre-line',
-                          lineHeight: '1.5'
+                          lineHeight: '1.5',
+                          overflowWrap: 'anywhere'
                         }}
                       >
-                        {issue.description || 'dfdf'}
+                        {issue.description || 'No description provided.'}
                       </div>
                     </div>
 
@@ -815,23 +1285,34 @@ export const IssueDetailsPage: React.FC = () => {
                       <div
                         className="rounded-3 p-3"
                         style={{
-                          backgroundColor: '#f0fdf4',
-                          border: '1px solid #bbf7d0',
-                          minHeight: '85px'
+                          backgroundColor: issue.rca ? '#f0fdf4' : '#f8fafc',
+                          border: `1px solid ${issue.rca ? '#bbf7d0' : '#e2e8f0'}`,
+                          minHeight: '75px'
                         }}
                       >
-                        <div className="mb-2">
-                          <span
-                            className="badge bg-success text-white px-2.5 py-1 rounded-pill fw-semibold d-inline-flex align-items-center gap-1.5"
-                            style={{ fontSize: '0.75rem' }}
-                          >
-                            <i className="bi bi-check-circle-fill"></i>
-                            RCA Verified
+                        {issue.rca ? (
+                          <>
+                            <div className="mb-2">
+                              <span
+                                className="badge bg-success text-white px-2.5 py-1 rounded-pill fw-semibold d-inline-flex align-items-center gap-1.5"
+                                style={{ fontSize: '0.75rem' }}
+                              >
+                                <i className="bi bi-check-circle-fill"></i>
+                                RCA Recorded
+                              </span>
+                            </div>
+                            <div
+                              className="text-navy lh-base"
+                              style={{ fontSize: '0.9rem', whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}
+                            >
+                              {issue.rca}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-muted small fst-italic">
+                            No root cause analysis recorded yet.
                           </span>
-                        </div>
-                        <div className="text-navy lh-base" style={{ fontSize: '0.9rem', whiteSpace: 'pre-line' }}>
-                          {issue.rca || issue.description || 'dfdf'}
-                        </div>
+                        )}
                       </div>
                     </div>
 
@@ -873,7 +1354,7 @@ export const IssueDetailsPage: React.FC = () => {
                                 className="badge rounded-pill px-3 py-1.5 fw-medium"
                                 style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '0.78rem' }}
                               >
-                                Unassigned (Queue Pending)
+                                Unassigned
                               </span>
                             )}
                           </div>
@@ -913,315 +1394,21 @@ export const IssueDetailsPage: React.FC = () => {
 
           {/* ================= RIGHT COLUMN (~41%): INCIDENT COLLABORATION THREAD ================= */}
           <div className="col-12 col-lg-5 d-flex flex-column details-column h-100 min-h-0">
-            <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
-
-              {/* Thread Header */}
-              <div className="p-3 border-bottom d-flex align-items-center justify-content-between bg-white flex-shrink-0">
-                <div className="d-flex align-items-center gap-2.5">
-                  <i className="bi bi-chat-dots-fill text-primary fs-5"></i>
-                  <div>
-                    <h6 className="fw-bold text-navy mb-0" style={{ fontSize: '0.95rem' }}>
-                      Incident Collaboration Thread
-                    </h6>
-                    <small className="text-muted" style={{ fontSize: '0.75rem' }}>
-                      2-way Sync between Supporters and Developers
-                    </small>
-                  </div>
-                </div>
-
-                <div className="d-flex align-items-center gap-2">
-                  <span
-                    className="badge rounded-pill px-3 py-1.5 fw-medium"
-                    style={{
-                      backgroundColor: '#eef2f6',
-                      color: '#334155',
-                      border: '1px solid #e2e8f0',
-                      fontSize: '0.78rem'
-                    }}
-                  >
-                    {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Scrollable Message List / Empty State */}
-              <div className="p-3.5 overflow-y-auto flex-grow-1 d-flex flex-column gap-3.5 bg-white">
-                {messages.length === 0 ? (
-                  <div className="my-auto text-center py-5 px-3">
-                    {/* Two-bubble illustration matching reference */}
-                    <svg
-                      width="92"
-                      height="74"
-                      viewBox="0 0 100 80"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="mb-3"
-                    >
-                      {/* Left Sky Blue Bubble */}
-                      <path
-                        d="M15 15C15 9.47715 19.4772 5 25 5H55C60.5228 5 65 9.47715 65 15V35C65 40.5228 60.5228 45 55 45H32L20 54V45H25C19.4772 45 15 40.5228 15 35V15Z"
-                        fill="#93C5FD"
-                      />
-                      <rect x="25" y="17" width="28" height="3.5" rx="1.75" fill="white" />
-                      <rect x="25" y="25" width="20" height="3.5" rx="1.75" fill="white" />
-                      {/* Right Powder Blue Bubble */}
-                      <path
-                        d="M42 32C42 26.4772 46.4772 22 52 22H78C83.5228 22 88 26.4772 88 32V50C88 55.5228 83.5228 60 78 60H75V67L64 60H52C46.4772 60 42 55.5228 42 50V32Z"
-                        fill="#BFDBFE"
-                      />
-                      <rect x="52" y="34" width="26" height="3.5" rx="1.75" fill="white" />
-                      <rect x="52" y="42" width="18" height="3.5" rx="1.75" fill="white" />
-                      {/* Accent Sparkles */}
-                      <circle cx="82" cy="14" r="2.5" fill="#60A5FA" />
-                      <circle cx="88" cy="18" r="1.5" fill="#93C5FD" />
-                    </svg>
-
-                    <h6 className="fw-bold text-navy mb-1" style={{ fontSize: '0.95rem' }}>
-                      No messages yet in this discussion.
-                    </h6>
-                    <p className="text-muted small mb-0" style={{ fontSize: '0.8rem' }}>
-                      Start the collaboration by sending a message below.
-                    </p>
-                  </div>
-                ) : (
-                  messages.map((msg) => {
-                    const isSenderMsg = checkIsSender(msg);
-                    const isDeveloper =
-                      msg.senderRole?.toLowerCase().includes('dev') ||
-                      msg.senderName?.toLowerCase().includes('jeva') ||
-                      msg.senderName?.toLowerCase().includes('arun');
-
-                    const avatarLetter = (msg.senderName || 'U').charAt(0).toUpperCase();
-                    const isCurrentlyEditing = editingMessageId === msg.id;
-                    const isEditable = isSenderMsg && isWithin15Minutes(msg.createdAt);
-                    const remainingMins = getRemainingEditMinutes(msg.createdAt);
-
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`d-flex ${isSenderMsg ? 'justify-content-end' : 'justify-content-start'} w-100 mb-3`}
-                      >
-                        <div
-                          className={`d-flex align-items-start gap-2.5 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}
-                          style={{ maxWidth: '85%' }}
-                        >
-                          {/* Avatar */}
-                          <div
-                            className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold shadow-2xs flex-shrink-0"
-                            style={{
-                              width: '38px',
-                              height: '38px',
-                              fontSize: '0.95rem',
-                              backgroundColor: isSenderMsg ? '#0d6efd' : (isDeveloper ? '#8b5cf6' : '#0284c7')
-                            }}
-                          >
-                            {avatarLetter}
-                          </div>
-
-                          {/* Content on Left / Right */}
-                          <div className={`d-flex flex-column ${isSenderMsg ? 'align-items-end' : 'align-items-start'} min-w-0 flex-grow-1`}>
-                            {/* Top Meta Line: Sender Name + Role Badge + Timestamp */}
-                            <div className={`d-flex align-items-center gap-2 mb-1.5 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}>
-                              <span className="fw-bold text-navy" style={{ fontSize: '0.9rem' }}>
-                                {isSenderMsg ? `${msg.senderName} (You)` : msg.senderName}
-                              </span>
-                              <span
-                                className="badge rounded-pill px-2.5 py-0.5 fw-semibold"
-                                style={{
-                                  fontSize: '0.72rem',
-                                  backgroundColor: isDeveloper ? '#f3e8ff' : '#dbeafe',
-                                  color: isDeveloper ? '#7c3aed' : '#2563eb'
-                                }}
-                              >
-                                {isDeveloper ? 'Developer' : 'Supporter'}
-                              </span>
-                              <span className="text-secondary small" style={{ fontSize: '0.75rem' }}>
-                                {msg.timestamp}
-                                {msg.isEdited && <span className="ms-1 text-muted fst-italic">(edited)</span>}
-                              </span>
-                            </div>
-
-                            {/* Message Bubble Container */}
-                            <div
-                              className="rounded-3 p-3 shadow-2xs position-relative"
-                              style={{
-                                backgroundColor: isSenderMsg ? '#0d6efd' : (isDeveloper ? '#faf5ff' : '#eff6ff'),
-                                color: isSenderMsg ? '#ffffff' : '#1e293b',
-                                border: isSenderMsg ? '1px solid #0d6efd' : `1px solid ${isDeveloper ? '#f3e8ff' : '#dbeafe'}`,
-                                fontSize: '0.88rem',
-                                lineHeight: 1.45,
-                                wordBreak: 'break-word',
-                                whiteSpace: 'pre-line',
-                                borderTopRightRadius: isSenderMsg ? '4px' : '14px',
-                                borderTopLeftRadius: !isSenderMsg ? '4px' : '14px',
-                                borderBottomLeftRadius: '14px',
-                                borderBottomRightRadius: '14px',
-                                minWidth: '180px'
-                              }}
-                            >
-                              {isCurrentlyEditing ? (
-                                /* Inline Editing UI */
-                                <div className="w-100" style={{ minWidth: '240px' }}>
-                                  <div className="d-flex align-items-center justify-content-between mb-1.5">
-                                    <span className="fw-semibold small" style={{ color: isSenderMsg ? '#ffffff' : '#1e293b', fontSize: '0.78rem' }}>
-                                      <i className="bi bi-pencil me-1"></i> Edit Message
-                                    </span>
-                                    <span className="badge rounded-pill bg-white text-primary px-2 py-0.5 fw-semibold" style={{ fontSize: '0.7rem' }}>
-                                      {remainingMins}m left
-                                    </span>
-                                  </div>
-
-                                  <textarea
-                                    className="form-control form-control-sm mb-2 shadow-sm text-navy"
-                                    rows={3}
-                                    value={editingText}
-                                    onChange={(e) => setEditingText(e.target.value)}
-                                    style={{
-                                      fontSize: '0.88rem',
-                                      backgroundColor: '#ffffff',
-                                      color: '#0f172a',
-                                      border: '1px solid #cbd5e1'
-                                    }}
-                                    autoFocus
-                                  />
-
-                                  {editMessageError && (
-                                    <div className="alert alert-danger py-1 px-2 small mb-2" style={{ fontSize: '0.75rem' }}>
-                                      {editMessageError}
-                                    </div>
-                                  )}
-
-                                  <div className="d-flex align-items-center justify-content-end gap-1.5">
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm btn-light py-1 px-2.5 fw-medium"
-                                      style={{ fontSize: '0.78rem' }}
-                                      onClick={handleCancelEdit}
-                                      disabled={isSavingEdit}
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm btn-warning py-1 px-3 fw-bold d-inline-flex align-items-center gap-1 shadow-sm text-dark"
-                                      style={{ fontSize: '0.78rem' }}
-                                      onClick={() => handleSaveMessageEdit(msg.id)}
-                                      disabled={!editingText.trim() || isSavingEdit}
-                                    >
-                                      {isSavingEdit ? (
-                                        <span className="spinner-border spinner-border-sm" role="status"></span>
-                                      ) : (
-                                        <>
-                                          <i className="bi bi-check-lg"></i> Save Changes
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <>
-                                  <div>{msg.markdown || msg.message}</div>
-
-                                  {/* Attached file capsule if present */}
-                                  {msg.attachment && (
-                                    <div className="mt-2.5">
-                                      <div
-                                        className="d-inline-flex align-items-center gap-2 px-3 py-1.5 rounded-pill bg-white border shadow-2xs text-navy"
-                                        style={{ borderColor: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
-                                        title="Download attachment"
-                                      >
-                                        <i className="bi bi-paperclip text-secondary"></i>
-                                        <span className="fw-medium text-navy">{msg.attachment.name}</span>
-                                        {msg.attachment.size && <span className="text-muted">({msg.attachment.size})</span>}
-                                        <i className="bi bi-download text-secondary ms-1"></i>
-                                      </div>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-
-                            {/* Meta Actions Below Bubble: 15-Minute Edit & Reactions */}
-                            <div className={`d-flex align-items-center gap-2 mt-1 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}>
-                              {/* 15-Minute Edit Button: Available only for Sender within 15 mins */}
-                              {isSenderMsg && isEditable && !isCurrentlyEditing && (
-                                <button
-                                  type="button"
-                                  className="btn btn-link btn-sm text-primary p-0 text-decoration-none d-inline-flex align-items-center gap-1 fw-semibold"
-                                  style={{ fontSize: '0.75rem' }}
-                                  onClick={() => handleStartEdit(msg)}
-                                  title={`Edit message (${remainingMins}m remaining in the 15-min edit window)`}
-                                >
-                                  <i className="bi bi-pencil-square"></i>
-                                  <span>Edit</span>
-                                  <span className="text-muted fw-normal" style={{ fontSize: '0.7rem' }}>({remainingMins}m left)</span>
-                                </button>
-                              )}
-
-                              {/* Reaction badge below bubble if present */}
-                              {msg.reaction && (
-                                <div
-                                  className="d-inline-flex align-items-center gap-1 px-2.5 py-0.5 rounded-pill bg-white border shadow-2xs"
-                                  style={{ borderColor: '#e2e8f0', fontSize: '0.75rem', backgroundColor: '#ffffff' }}
-                                >
-                                  <span>{msg.reaction}</span>
-                                </div>
-                              )}
-                            </div>
-
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={chatBottomRef} />
-              </div>
-
-              {/* Message Composer Box matching reference pill style */}
-              <div className="p-3 bg-white border-top flex-shrink-0">
-                <form onSubmit={handleSendMessage}>
-                  <div
-                    className="d-flex align-items-center gap-2 rounded-pill p-1.5 ps-2 bg-white"
-                    style={{ border: '1px solid #cbd5e1' }}
-                  >
-                    <button
-                      type="button"
-                      className="btn rounded-circle p-0 d-flex align-items-center justify-content-center flex-shrink-0 border-0"
-                      style={{ width: '34px', height: '34px', backgroundColor: '#eef2f6', color: '#64748b' }}
-                      title="Attach file"
-                    >
-                      <i className="bi bi-paperclip fs-5"></i>
-                    </button>
-
-                    <input
-                      type="text"
-                      className="form-control border-0 bg-transparent shadow-none px-2 small text-navy"
-                      placeholder="Type a message to collaborate with engineers..."
-                      value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
-                      disabled={isSending}
-                      style={{ fontSize: '0.86rem' }}
-                    />
-
-                    <button
-                      type="submit"
-                      className="btn btn-primary rounded-circle d-flex align-items-center justify-content-center p-0 flex-shrink-0 border-0 shadow-sm"
-                      style={{ width: '36px', height: '36px', backgroundColor: '#0d6efd' }}
-                      disabled={!messageText.trim() || isSending}
-                      title="Send message"
-                    >
-                      {isSending ? (
-                        <span className="spinner-border spinner-border-sm text-white" role="status"></span>
-                      ) : (
-                        <i className="bi bi-send-fill text-white" style={{ fontSize: '0.9rem', marginLeft: '1px' }}></i>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-            </div>
+            <IssueCollaborationThread
+              messages={messages}
+              currentUser={currentUser}
+              messageText={messageText}
+              onMessageTextChange={setMessageText}
+              onSendMessage={handleSendMessage}
+              onEditMessage={handleEditMessage}
+              isLoading={messagesLoading}
+              isSending={isSending}
+              fetchError={messagesError}
+              sendError={sendError}
+              isWebSocketConnected={isMessagesWsConnected}
+              onRetryFetch={fetchLiveMessages}
+              onDismissSendError={() => setSendError(null)}
+            />
           </div>
 
         </div>
@@ -1230,4 +1417,5 @@ export const IssueDetailsPage: React.FC = () => {
     </div>
   );
 };
+
 export default IssueDetailsPage;
