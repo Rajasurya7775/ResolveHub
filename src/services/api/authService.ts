@@ -1,6 +1,5 @@
 import { User, UserRole, SignupFormData } from '../../types/user';
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
+import { API_BASE_URL } from './apiClient';
 
 export interface AuthResponse {
   success: boolean;

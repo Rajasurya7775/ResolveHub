@@ -8,18 +8,7 @@ import { LoginHeroGraphic } from '../../components/auth/LoginHeroGraphic';
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedRole, setSelectedRole, login, isAuthenticated, currentUser } = useAuth();
-
-  React.useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      const isDev = String(currentUser.role || '').toLowerCase().includes('dev');
-      if (isDev) {
-        navigate('/developer/home', { replace: true });
-      } else {
-        navigate('/support/home', { replace: true });
-      }
-    }
-  }, [isAuthenticated, currentUser, navigate]);
+  const { selectedRole, setSelectedRole, login } = useAuth();
 
   const stateMsg = (location.state as any)?.message;
   const prefillId = (location.state as any)?.registeredId || (location.state as any)?.registeredEmail || '';

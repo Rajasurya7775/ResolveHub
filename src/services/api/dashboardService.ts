@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
+import { API_BASE_URL } from './apiClient';
 
 export interface DashboardSummary {
   totalLogged: number;
@@ -492,4 +492,9 @@ export async function apiFetchDeveloperPriorityDistribution(): Promise<{
     };
   }
 }
+
+// Aliases for role-agnostic consumption
+export const apiFetchSupportDashboardSummary = apiFetchDashboardSummary;
+export const apiFetchDeveloperDashboardSummary = apiFetchDeveloperSummary;
+
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { BrandLogo } from '../common/BrandLogo';
+import { getRoleConfig } from '../../config/roleConfig';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -17,20 +18,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
     navigate('/login');
   };
 
-  const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
-
-  // Role-based navigation items
-  const navLinks = isDev
-    ? [
-        { to: '/developer/home', label: 'Home', icon: 'bi-house-door-fill' },
-        { to: '/developer/assigned', label: 'Assigned Issues', icon: 'bi-person-check-fill' },
-        { to: '/developer/all', label: 'All Issues', icon: 'bi-grid-fill' }
-      ]
-    : [
-        { to: '/support/home', label: 'Home', icon: 'bi-house-door-fill' },
-        { to: '/support/my-issues', label: 'My Issues', icon: 'bi-list-ul' },
-        { to: '/support/previous-issues', label: 'Previous Issues', icon: 'bi-clock-history' }
-      ];
+  const roleConfig = getRoleConfig(currentUser?.role);
+  const navLinks = roleConfig.navLinks;
 
   return (
     <>

@@ -98,8 +98,8 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
 
       {/* ================= CENTER: Shift, Date & Live Time Widget (Matching Reference UI) ================= */}
       <div
-        className="d-flex align-items-center gap-2.5 gap-md-3 px-3 py-1 rounded-pill bg-white border shadow-2xs"
-        style={{ borderColor: '#e2e8f0' }}
+        className="d-flex align-items-center gap-2.5 gap-md-3 px-3 py-1.5 rounded-pill bg-white border shadow-2xs"
+        style={{ borderColor: '#e2e8f0', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}
       >
         {/* 1. Current Shift Capsule & Shift Timing */}
         <div className="d-flex align-items-center gap-2">
@@ -109,19 +109,19 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
               backgroundColor: shiftStyles.bg,
               color: shiftStyles.text,
               border: `1px solid ${shiftStyles.border}`,
-              fontSize: '0.78rem'
+              fontSize: '0.8rem'
             }}
           >
             <span
               className="rounded-circle"
-              style={{ width: '7px', height: '7px', backgroundColor: shiftStyles.dot }}
+              style={{ width: '8px', height: '8px', backgroundColor: shiftStyles.dot }}
             ></span>
             <span>{shiftInfo.shift}</span>
           </span>
 
           <span
-            className="text-secondary small fw-medium"
-            style={{ fontSize: '0.8rem', color: '#475569' }}
+            className="fw-medium small"
+            style={{ fontSize: '0.82rem', color: '#334155' }}
           >
             ({shiftTiming})
           </span>
@@ -130,7 +130,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
         {/* 2. Current Date */}
         <div
           className="d-none d-sm-flex align-items-center gap-1.5 fw-bold"
-          style={{ fontSize: '0.82rem', color: '#1e293b' }}
+          style={{ fontSize: '0.84rem', color: '#1e293b' }}
         >
           <i className="bi bi-calendar3 fs-6" style={{ color: '#1e3a8a' }}></i>
           <span>{formattedDate}</span>
@@ -139,7 +139,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ pageTitle, onToggleSidebar
         {/* 3. Live Time */}
         <div
           className="d-flex align-items-center gap-1.5 fw-bold"
-          style={{ fontSize: '0.82rem', color: '#0f172a' }}
+          style={{ fontSize: '0.84rem', color: '#0f172a' }}
           title="Live System Time"
         >
           <i className="bi bi-clock fs-6" style={{ color: '#2563eb' }}></i>

@@ -6,10 +6,21 @@ const BACKOFF_FACTOR = 1.5;
 const DEBOUNCE_COOLDOWN_MS = 300;         // Prevent duplicate API calls on message bursts
 const HEARTBEAT_INTERVAL_MS = 25000;      // 25s keepalive ping to prevent idle connection drops
 
+export interface DashboardWebSocketOptions {
+  url?: string | null;
+  enabled?: boolean;
+}
+
+export interface DashboardWebSocketReturn {
+  isConnected: boolean;
+  lastEvent: any;
+  reconnect: () => void;
+}
+
 /**
  * Normalizes host from an API URL or environment string
  */
-function extractHostAndProtocol(rawUrl) {
+function extractHostAndProtocol(rawUrl?: string): { host: string; isSecure: boolean } {
   if (!rawUrl || typeof rawUrl !== 'string') {
     return { host: 'localhost:8000', isSecure: false };
   }
@@ -36,7 +47,7 @@ function extractHostAndProtocol(rawUrl) {
  * Returns candidate WebSocket URLs for the FastAPI backend.
  * Provides both `/ws/dashboard` and `/api/v1/ws/dashboard` for maximum compatibility.
  */
-export function getCandidateWebSocketUrls(customUrl = null) {
+export function getCandidateWebSocketUrls(customUrl: string | null = null): string[] {
   if (customUrl) {
     return [customUrl];
   }
@@ -64,7 +75,7 @@ export function getCandidateWebSocketUrls(customUrl = null) {
 /**
  * Resolves the primary FastAPI WebSocket URL
  */
-export function getDashboardWebSocketUrl(customUrl = null) {
+export function getDashboardWebSocketUrl(customUrl: string | null = null): string {
   const candidates = getCandidateWebSocketUrls(customUrl);
   return candidates[0];
 }
@@ -75,43 +86,38 @@ export function getDashboardWebSocketUrl(customUrl = null) {
  * Establishes a resilient, auto-reconnecting WebSocket connection with the FastAPI backend.
  * Listens for `dashboard_updated`, `issue_created`, `issue_updated` events and triggers
  * the callback to refresh dashboard KPIs & charts immediately.
- *
- * @param {Function} onDashboardUpdated - Callback triggered when real-time update is received
- * @param {Object} [options] - Configuration options
- * @param {string} [options.url] - Optional override WebSocket URL
- * @param {boolean} [options.enabled=true] - Toggle connection active state
- * @returns {{ isConnected: boolean, lastEvent: any, reconnect: Function }}
  */
-export function useDashboardWebSocket(onDashboardUpdated, options = {}) {
+export function useDashboardWebSocket(
+  onDashboardUpdated: (payload?: any) => void,
+  options: DashboardWebSocketOptions = {}
+): DashboardWebSocketReturn {
   const { url = null, enabled = true } = options;
 
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastEvent, setLastEvent] = useState(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [lastEvent, setLastEvent] = useState<any>(null);
 
   // Maintain latest callback via useRef
-  const callbackRef = useRef(onDashboardUpdated);
+  const callbackRef = useRef<(payload?: any) => void>(onDashboardUpdated);
   useEffect(() => {
     callbackRef.current = onDashboardUpdated;
   }, [onDashboardUpdated]);
 
-  const wsRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const heartbeatTimerRef = useRef(null);
-  const reconnectDelayRef = useRef(INITIAL_RECONNECT_DELAY_MS);
-  const candidateIndexRef = useRef(0);
-  const isUnmountedRef = useRef(false);
-  const lastTriggerTimeRef = useRef(0);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<any>(null);
+  const heartbeatTimerRef = useRef<any>(null);
+  const reconnectDelayRef = useRef<number>(INITIAL_RECONNECT_DELAY_MS);
+  const candidateIndexRef = useRef<number>(0);
+  const isUnmountedRef = useRef<boolean>(false);
+  const lastTriggerTimeRef = useRef<number>(0);
 
   // Safe trigger with debounce to avoid firing multiple duplicate API calls on rapid bursts
-  const triggerRefresh = useCallback((payload) => {
+  const triggerRefresh = useCallback((payload: any) => {
     const now = Date.now();
     if (now - lastTriggerTimeRef.current < DEBOUNCE_COOLDOWN_MS) {
       return;
     }
     lastTriggerTimeRef.current = now;
     setLastEvent(payload);
-
-    console.log('[useDashboardWebSocket] Real-time event received, triggering dashboard refresh:', payload);
 
     if (typeof callbackRef.current === 'function') {
       try {
@@ -164,7 +170,6 @@ export function useDashboardWebSocket(onDashboardUpdated, options = {}) {
         targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
       }
 
-      console.log(`[useDashboardWebSocket] Connecting to real-time endpoint: ${targetUrl}`);
       const socket = new WebSocket(targetUrl);
       wsRef.current = socket;
 
@@ -173,7 +178,6 @@ export function useDashboardWebSocket(onDashboardUpdated, options = {}) {
           socket.close();
           return;
         }
-        console.log(`[useDashboardWebSocket] Connected successfully to ${candidateUrl}`);
         setIsConnected(true);
         reconnectDelayRef.current = INITIAL_RECONNECT_DELAY_MS;
         startHeartbeat();
@@ -184,11 +188,11 @@ export function useDashboardWebSocket(onDashboardUpdated, options = {}) {
         }
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = (event: MessageEvent) => {
         if (isUnmountedRef.current) return;
 
         try {
-          let parsedData = null;
+          let parsedData: any = null;
           if (typeof event.data === 'string') {
             try {
               parsedData = JSON.parse(event.data);
@@ -233,16 +237,12 @@ export function useDashboardWebSocket(onDashboardUpdated, options = {}) {
         setIsConnected(false);
       };
 
-      socket.onclose = (closeEvent) => {
+      socket.onclose = (closeEvent: CloseEvent) => {
         clearHeartbeat();
         setIsConnected(false);
         wsRef.current = null;
 
         if (!isUnmountedRef.current && enabled) {
-          console.log(
-            `[useDashboardWebSocket] Disconnected (code: ${closeEvent.code}). Reconnecting in ${reconnectDelayRef.current}ms...`
-          );
-
           // Cycle candidate endpoint if connection was rejected
           if (closeEvent.code !== 1000) {
             candidateIndexRef.current = (candidateIndexRef.current + 1) % candidates.length;

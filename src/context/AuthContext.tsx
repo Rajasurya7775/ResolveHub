@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, SignupFormData } from '../types/user';
 import { apiLogin, apiSignup, apiGetProfile } from '../services/api/authService';
+import { getAuthToken, isTokenValid } from '../services/api/apiClient';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -19,11 +20,23 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_STORAGE_KEY = 'resolvehub_auth_user';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Pure dynamic session: No default dummy Surya user
+  const isMock = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
+
+  // Pure dynamic session: Requires both stored user and valid auth token
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
+      const token = getAuthToken();
       const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+
+      // In real backend mode, verify token exists and is valid
+      if (!isMock && (!token || !isTokenValid(token))) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem('resolvehub_auth_token');
+        return null;
+      }
+
+      return JSON.parse(saved);
     } catch {
       return null;
     }
@@ -151,7 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         updateProfile,
         refreshProfile,
-        isAuthenticated: !!currentUser
+        isAuthenticated: !!currentUser && (isMock || isTokenValid(getAuthToken()))
       }}
     >
       {children}

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useIssues } from '../../context/IssueContext';
 import { useAuth } from '../../context/AuthContext';
 import { Issue, DiscussionMessage } from '../../types/issue';
-import { apiFetchIssueById, apiFetchMessages, apiSendMessage } from '../../services/api/issueService';
+import { apiFetchIssueById, apiFetchMessages, apiSendMessage, apiUpdateMessage } from '../../services/api/issueService';
+import { useIssueMessagesWebSocket } from '../../hooks/useIssueMessagesWebSocket';
 
 const PROJECT_OPTIONS = [
   'Nokia Production Dashboard',
@@ -18,6 +19,48 @@ const ISSUE_TYPE_OPTIONS = [
   'Database',
   'Hardware',
   'Others'
+];
+
+const DEFAULT_THREAD_MESSAGES: DiscussionMessage[] = [
+  {
+    id: 'msg-seed-1',
+    issueId: '',
+    senderId: '38',
+    senderName: 'Sivabalan',
+    senderRole: 'Supporter',
+    message: "Can you please check this issue? It's blocking the manufacturing dashboard.",
+    markdown: "Can you please check this issue? It's blocking the manufacturing dashboard.",
+    timestamp: 'Nov 17, 2026 • 04:20 PM',
+    createdAt: '2026-11-17T16:20:00Z',
+    attachment: {
+      name: 'dashboard_error.log',
+      size: '245 KB',
+      url: '#'
+    }
+  },
+  {
+    id: 'msg-seed-2',
+    issueId: '',
+    senderId: '42',
+    senderName: 'jeva',
+    senderRole: 'Developer',
+    message: "Sure, I'm looking into it. Will update you shortly.",
+    markdown: "Sure, I'm looking into it. Will update you shortly.",
+    timestamp: 'Nov 17, 2026 • 04:32 PM',
+    createdAt: '2026-11-17T16:32:00Z',
+    reaction: '👍 1'
+  },
+  {
+    id: 'msg-seed-3',
+    issueId: '',
+    senderId: '38',
+    senderName: 'Sivabalan',
+    senderRole: 'Supporter',
+    message: 'Thanks! Let me know if you need any logs. 😊',
+    markdown: 'Thanks! Let me know if you need any logs. 😊',
+    timestamp: 'Nov 17, 2026 • 04:36 PM',
+    createdAt: new Date(Date.now() - 4 * 60 * 1000).toISOString()
+  }
 ];
 
 export const IssueDetailsPage: React.FC = () => {
@@ -78,11 +121,19 @@ export const IssueDetailsPage: React.FC = () => {
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string>('');
 
-  // Discussion state
-  const [messages, setMessages] = useState<DiscussionMessage[]>([]);
+  // Discussion state - initialized with reference thread messages
+  const [messages, setMessages] = useState<DiscussionMessage[]>(() =>
+    DEFAULT_THREAD_MESSAGES.map((m) => ({ ...m, issueId: id || '' }))
+  );
   const [messageText, setMessageText] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Message Editing state (15-minute edit window)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+  const [editMessageError, setEditMessageError] = useState<string | null>(null);
 
   // 1. Fetch live issue details from backend API on mount / ID change
   const fetchLiveIssue = async () => {
@@ -121,6 +172,8 @@ export const IssueDetailsPage: React.FC = () => {
     const msgs = await apiFetchMessages(id);
     if (msgs && msgs.length > 0) {
       setMessages(msgs);
+    } else {
+      setMessages(DEFAULT_THREAD_MESSAGES.map((m) => ({ ...m, issueId: id })));
     }
   };
 
@@ -128,6 +181,22 @@ export const IssueDetailsPage: React.FC = () => {
     fetchLiveIssue();
     fetchLiveMessages();
   }, [id]);
+
+  // 3. Real-time WebSocket & Cross-Tab Synchronization
+  const { broadcastMessage } = useIssueMessagesWebSocket({
+    issueId: id,
+    onNewMessage: (newMsg) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg];
+      });
+    },
+    onMessagesUpdated: (allMsgs) => {
+      if (allMsgs && allMsgs.length > 0) {
+        setMessages(allMsgs);
+      }
+    }
+  });
 
   // Scroll chat to bottom when messages update
   useEffect(() => {
@@ -203,11 +272,14 @@ export const IssueDetailsPage: React.FC = () => {
       senderRole,
       message: text,
       markdown: text,
+      createdAt: now.toISOString(),
       timestamp: formattedTimestamp
     };
 
     // Immediately display optimistic message in UI
     setMessages((prev) => [...prev, optimisticMsg]);
+    // Real-time broadcast to other tabs/windows and active WebSocket immediately
+    broadcastMessage(optimisticMsg);
 
     try {
       const res = await apiSendMessage(id, text, currentUser?.id, currentUser?.name);
@@ -215,6 +287,7 @@ export const IssueDetailsPage: React.FC = () => {
         setMessages((prev) =>
           prev.map((m) => (m.id === optimisticMsg.id ? res.message! : m))
         );
+        broadcastMessage(res.message);
       } else {
         await fetchLiveMessages();
       }
@@ -222,6 +295,91 @@ export const IssueDetailsPage: React.FC = () => {
       console.error('Failed to send message:', err);
     } finally {
       setIsSending(false);
+    }
+  };
+
+  // 15-Minute Edit Window Constants & Helpers
+  const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+  const getRemainingEditMinutes = useCallback((createdAt?: string): number => {
+    if (!createdAt) return 15;
+    const createdTime = new Date(createdAt).getTime();
+    if (isNaN(createdTime)) return 15;
+    const elapsed = Date.now() - createdTime;
+    const remaining = Math.max(0, EDIT_WINDOW_MS - elapsed);
+    return Math.ceil(remaining / 60000);
+  }, [EDIT_WINDOW_MS]);
+
+  const isWithin15Minutes = useCallback((createdAt?: string): boolean => {
+    if (!createdAt) return true;
+    const createdTime = new Date(createdAt).getTime();
+    if (isNaN(createdTime)) return true;
+    const elapsed = Date.now() - createdTime;
+    return elapsed >= 0 && elapsed <= EDIT_WINDOW_MS;
+  }, [EDIT_WINDOW_MS]);
+
+  const checkIsSender = useCallback((msg: DiscussionMessage): boolean => {
+    if (currentUser) {
+      if (currentUser.id && String(msg.senderId) === String(currentUser.id)) return true;
+      if (currentUser.employeeId && String(msg.senderId) === String(currentUser.employeeId)) return true;
+      if (currentUser.name && msg.senderName?.trim().toLowerCase() === currentUser.name?.trim().toLowerCase()) return true;
+    }
+    if (isDevUser) {
+      return Boolean(msg.senderRole?.toLowerCase().includes('dev') || msg.senderName?.toLowerCase().includes('jeva'));
+    }
+    return Boolean(msg.senderRole?.toLowerCase().includes('supp') || msg.senderName?.toLowerCase().includes('sivabalan'));
+  }, [currentUser, isDevUser]);
+
+  const handleStartEdit = (msg: DiscussionMessage) => {
+    setEditingMessageId(msg.id);
+    setEditingText(msg.markdown || msg.message || '');
+    setEditMessageError(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingText('');
+    setEditMessageError(null);
+  };
+
+  const handleSaveMessageEdit = async (msgId: string) => {
+    if (!id || !editingText.trim()) return;
+    const targetMsg = messages.find((m) => m.id === msgId);
+    if (!targetMsg) return;
+
+    if (!isWithin15Minutes(targetMsg.createdAt)) {
+      setEditMessageError('Edit window has expired. Messages can only be edited within the first 15 minutes.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    setEditMessageError(null);
+
+    const updatedContent = editingText.trim();
+    const updatedMsg: DiscussionMessage = {
+      ...targetMsg,
+      message: updatedContent,
+      markdown: updatedContent,
+      isEdited: true,
+      editedAt: new Date().toISOString()
+    };
+
+    // Optimistic UI update
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? updatedMsg : m))
+    );
+
+    // Broadcast across tabs
+    broadcastMessage(updatedMsg);
+
+    try {
+      await apiUpdateMessage(id, msgId, updatedContent);
+    } catch (err) {
+      console.error('Failed to update message on backend:', err);
+    } finally {
+      setIsSavingEdit(false);
+      setEditingMessageId(null);
+      setEditingText('');
     }
   };
 
@@ -770,17 +928,20 @@ export const IssueDetailsPage: React.FC = () => {
                     </small>
                   </div>
                 </div>
-                <span
-                  className="badge rounded-pill px-3 py-1 small fw-semibold"
-                  style={{
-                    backgroundColor: '#f1f5f9',
-                    color: '#64748b',
-                    border: '1px solid #e2e8f0',
-                    fontSize: '0.75rem'
-                  }}
-                >
-                  {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-                </span>
+
+                <div className="d-flex align-items-center gap-2">
+                  <span
+                    className="badge rounded-pill px-3 py-1.5 fw-medium"
+                    style={{
+                      backgroundColor: '#eef2f6',
+                      color: '#334155',
+                      border: '1px solid #e2e8f0',
+                      fontSize: '0.78rem'
+                    }}
+                  >
+                    {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+                  </span>
+                </div>
               </div>
 
               {/* Scrollable Message List / Empty State */}
@@ -824,95 +985,191 @@ export const IssueDetailsPage: React.FC = () => {
                   </div>
                 ) : (
                   messages.map((msg) => {
+                    const isSenderMsg = checkIsSender(msg);
                     const isDeveloper =
                       msg.senderRole?.toLowerCase().includes('dev') ||
                       msg.senderName?.toLowerCase().includes('jeva') ||
                       msg.senderName?.toLowerCase().includes('arun');
 
                     const avatarLetter = (msg.senderName || 'U').charAt(0).toUpperCase();
+                    const isCurrentlyEditing = editingMessageId === msg.id;
+                    const isEditable = isSenderMsg && isWithin15Minutes(msg.createdAt);
+                    const remainingMins = getRemainingEditMinutes(msg.createdAt);
 
                     return (
-                      <div key={msg.id} className="d-flex align-items-start gap-2.5">
-                        {/* Avatar on Left */}
+                      <div
+                        key={msg.id}
+                        className={`d-flex ${isSenderMsg ? 'justify-content-end' : 'justify-content-start'} w-100 mb-3`}
+                      >
                         <div
-                          className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold shadow-2xs flex-shrink-0"
-                          style={{
-                            width: '38px',
-                            height: '38px',
-                            fontSize: '0.95rem',
-                            backgroundColor: isDeveloper ? '#8b5cf6' : '#0d6efd'
-                          }}
+                          className={`d-flex align-items-start gap-2.5 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}
+                          style={{ maxWidth: '85%' }}
                         >
-                          {avatarLetter}
-                        </div>
+                          {/* Avatar */}
+                          <div
+                            className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold shadow-2xs flex-shrink-0"
+                            style={{
+                              width: '38px',
+                              height: '38px',
+                              fontSize: '0.95rem',
+                              backgroundColor: isSenderMsg ? '#0d6efd' : (isDeveloper ? '#8b5cf6' : '#0284c7')
+                            }}
+                          >
+                            {avatarLetter}
+                          </div>
 
-                        {/* Content on Right */}
-                        <div className="flex-grow-1 min-w-0">
-                          {/* Top Meta Line: Sender Name + Role Badge + Timestamp */}
-                          <div className="d-flex align-items-center justify-content-between mb-1.5">
-                            <div className="d-flex align-items-center gap-2">
+                          {/* Content on Left / Right */}
+                          <div className={`d-flex flex-column ${isSenderMsg ? 'align-items-end' : 'align-items-start'} min-w-0 flex-grow-1`}>
+                            {/* Top Meta Line: Sender Name + Role Badge + Timestamp */}
+                            <div className={`d-flex align-items-center gap-2 mb-1.5 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}>
                               <span className="fw-bold text-navy" style={{ fontSize: '0.9rem' }}>
-                                {msg.senderName}
+                                {isSenderMsg ? `${msg.senderName} (You)` : msg.senderName}
                               </span>
                               <span
                                 className="badge rounded-pill px-2.5 py-0.5 fw-semibold"
                                 style={{
                                   fontSize: '0.72rem',
-                                  // backgroundColor: isDeveloper ? '#f5f3ff' : '#eff6ff',
-                                  // color: isDeveloper ? '#7c3aed' : '#2563eb',
-                                  // border: `1px solid ${isDeveloper ? '#ede9fe' : '#dbeafe'}`
+                                  backgroundColor: isDeveloper ? '#f3e8ff' : '#dbeafe',
+                                  color: isDeveloper ? '#7c3aed' : '#2563eb'
                                 }}
                               >
                                 {isDeveloper ? 'Developer' : 'Supporter'}
                               </span>
+                              <span className="text-secondary small" style={{ fontSize: '0.75rem' }}>
+                                {msg.timestamp}
+                                {msg.isEdited && <span className="ms-1 text-muted fst-italic">(edited)</span>}
+                              </span>
                             </div>
 
-                            <span className="text-secondary small" style={{ fontSize: '0.75rem' }}>
-                              {msg.timestamp}
-                            </span>
-                          </div>
-
-                          {/* Message Bubble Container */}
-                          <div
-                            className="rounded-3 p-3 shadow-2xs"
-                            style={{
-                              backgroundColor: isDeveloper ? '#faf5ff' : '#eff6ff',
-                              border: `1px solid ${isDeveloper ? '#f3e8ff' : '#dbeafe'}`,
-                              color: '#1e293b',
-                              fontSize: '0.88rem',
-                              lineHeight: 1.45,
-                              wordBreak: 'break-word',
-                              whiteSpace: 'pre-line'
-                            }}
-                          >
-                            {msg.markdown || msg.message}
-
-                            {/* Attached file capsule if present */}
-                            {msg.attachment && (
-                              <div>
-                                <div
-                                  className="d-inline-flex align-items-center gap-2 px-3 py-1.5 rounded-pill bg-white border mt-2 shadow-2xs"
-                                  style={{ borderColor: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
-                                  title="Download attachment"
-                                >
-                                  <i className="bi bi-paperclip text-secondary"></i>
-                                  <span className="fw-medium text-navy">{msg.attachment.name}</span>
-                                  {msg.attachment.size && <span className="text-muted">({msg.attachment.size})</span>}
-                                  <i className="bi bi-download text-secondary ms-1"></i>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Reaction badge below bubble if present */}
-                          {msg.reaction && (
+                            {/* Message Bubble Container */}
                             <div
-                              className="d-inline-flex align-items-center gap-1 px-2.5 py-0.5 rounded-pill bg-white border mt-1 shadow-2xs"
-                              style={{ borderColor: '#e2e8f0', fontSize: '0.75rem' }}
+                              className="rounded-3 p-3 shadow-2xs position-relative"
+                              style={{
+                                backgroundColor: isSenderMsg ? '#0d6efd' : (isDeveloper ? '#faf5ff' : '#eff6ff'),
+                                color: isSenderMsg ? '#ffffff' : '#1e293b',
+                                border: isSenderMsg ? '1px solid #0d6efd' : `1px solid ${isDeveloper ? '#f3e8ff' : '#dbeafe'}`,
+                                fontSize: '0.88rem',
+                                lineHeight: 1.45,
+                                wordBreak: 'break-word',
+                                whiteSpace: 'pre-line',
+                                borderTopRightRadius: isSenderMsg ? '4px' : '14px',
+                                borderTopLeftRadius: !isSenderMsg ? '4px' : '14px',
+                                borderBottomLeftRadius: '14px',
+                                borderBottomRightRadius: '14px',
+                                minWidth: '180px'
+                              }}
                             >
-                              <span>{msg.reaction}</span>
+                              {isCurrentlyEditing ? (
+                                /* Inline Editing UI */
+                                <div className="w-100" style={{ minWidth: '240px' }}>
+                                  <div className="d-flex align-items-center justify-content-between mb-1.5">
+                                    <span className="fw-semibold small" style={{ color: isSenderMsg ? '#ffffff' : '#1e293b', fontSize: '0.78rem' }}>
+                                      <i className="bi bi-pencil me-1"></i> Edit Message
+                                    </span>
+                                    <span className="badge rounded-pill bg-white text-primary px-2 py-0.5 fw-semibold" style={{ fontSize: '0.7rem' }}>
+                                      {remainingMins}m left
+                                    </span>
+                                  </div>
+
+                                  <textarea
+                                    className="form-control form-control-sm mb-2 shadow-sm text-navy"
+                                    rows={3}
+                                    value={editingText}
+                                    onChange={(e) => setEditingText(e.target.value)}
+                                    style={{
+                                      fontSize: '0.88rem',
+                                      backgroundColor: '#ffffff',
+                                      color: '#0f172a',
+                                      border: '1px solid #cbd5e1'
+                                    }}
+                                    autoFocus
+                                  />
+
+                                  {editMessageError && (
+                                    <div className="alert alert-danger py-1 px-2 small mb-2" style={{ fontSize: '0.75rem' }}>
+                                      {editMessageError}
+                                    </div>
+                                  )}
+
+                                  <div className="d-flex align-items-center justify-content-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-light py-1 px-2.5 fw-medium"
+                                      style={{ fontSize: '0.78rem' }}
+                                      onClick={handleCancelEdit}
+                                      disabled={isSavingEdit}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-warning py-1 px-3 fw-bold d-inline-flex align-items-center gap-1 shadow-sm text-dark"
+                                      style={{ fontSize: '0.78rem' }}
+                                      onClick={() => handleSaveMessageEdit(msg.id)}
+                                      disabled={!editingText.trim() || isSavingEdit}
+                                    >
+                                      {isSavingEdit ? (
+                                        <span className="spinner-border spinner-border-sm" role="status"></span>
+                                      ) : (
+                                        <>
+                                          <i className="bi bi-check-lg"></i> Save Changes
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div>{msg.markdown || msg.message}</div>
+
+                                  {/* Attached file capsule if present */}
+                                  {msg.attachment && (
+                                    <div className="mt-2.5">
+                                      <div
+                                        className="d-inline-flex align-items-center gap-2 px-3 py-1.5 rounded-pill bg-white border shadow-2xs text-navy"
+                                        style={{ borderColor: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
+                                        title="Download attachment"
+                                      >
+                                        <i className="bi bi-paperclip text-secondary"></i>
+                                        <span className="fw-medium text-navy">{msg.attachment.name}</span>
+                                        {msg.attachment.size && <span className="text-muted">({msg.attachment.size})</span>}
+                                        <i className="bi bi-download text-secondary ms-1"></i>
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
                             </div>
-                          )}
+
+                            {/* Meta Actions Below Bubble: 15-Minute Edit & Reactions */}
+                            <div className={`d-flex align-items-center gap-2 mt-1 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}>
+                              {/* 15-Minute Edit Button: Available only for Sender within 15 mins */}
+                              {isSenderMsg && isEditable && !isCurrentlyEditing && (
+                                <button
+                                  type="button"
+                                  className="btn btn-link btn-sm text-primary p-0 text-decoration-none d-inline-flex align-items-center gap-1 fw-semibold"
+                                  style={{ fontSize: '0.75rem' }}
+                                  onClick={() => handleStartEdit(msg)}
+                                  title={`Edit message (${remainingMins}m remaining in the 15-min edit window)`}
+                                >
+                                  <i className="bi bi-pencil-square"></i>
+                                  <span>Edit</span>
+                                  <span className="text-muted fw-normal" style={{ fontSize: '0.7rem' }}>({remainingMins}m left)</span>
+                                </button>
+                              )}
+
+                              {/* Reaction badge below bubble if present */}
+                              {msg.reaction && (
+                                <div
+                                  className="d-inline-flex align-items-center gap-1 px-2.5 py-0.5 rounded-pill bg-white border shadow-2xs"
+                                  style={{ borderColor: '#e2e8f0', fontSize: '0.75rem', backgroundColor: '#ffffff' }}
+                                >
+                                  <span>{msg.reaction}</span>
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
                         </div>
                       </div>
                     );
@@ -925,27 +1182,40 @@ export const IssueDetailsPage: React.FC = () => {
               <div className="p-3 bg-white border-top flex-shrink-0">
                 <form onSubmit={handleSendMessage}>
                   <div
-                    className="d-flex align-items-center gap-2 rounded-pill px-3 py-1.5"
-                    style={{ border: '1px solid #cbd5e1', backgroundColor: '#ffffff' }}
+                    className="d-flex align-items-center gap-2 rounded-pill p-1.5 ps-2 bg-white"
+                    style={{ border: '1px solid #cbd5e1' }}
                   >
-                    <i className="bi bi-paperclip text-secondary fs-5" style={{ cursor: 'pointer' }} title="Attach file"></i>
+                    <button
+                      type="button"
+                      className="btn rounded-circle p-0 d-flex align-items-center justify-content-center flex-shrink-0 border-0"
+                      style={{ width: '34px', height: '34px', backgroundColor: '#eef2f6', color: '#64748b' }}
+                      title="Attach file"
+                    >
+                      <i className="bi bi-paperclip fs-5"></i>
+                    </button>
+
                     <input
                       type="text"
-                      className="form-control border-0 bg-transparent shadow-none px-1 small text-navy"
+                      className="form-control border-0 bg-transparent shadow-none px-2 small text-navy"
                       placeholder="Type a message to collaborate with engineers..."
                       value={messageText}
                       onChange={(e) => setMessageText(e.target.value)}
                       disabled={isSending}
-                      style={{ fontSize: '0.85rem' }}
+                      style={{ fontSize: '0.86rem' }}
                     />
+
                     <button
                       type="submit"
-                      className="btn btn-primary rounded-circle d-flex align-items-center justify-content-center p-0 flex-shrink-0"
-                      style={{ width: '34px', height: '34px' }}
+                      className="btn btn-primary rounded-circle d-flex align-items-center justify-content-center p-0 flex-shrink-0 border-0 shadow-sm"
+                      style={{ width: '36px', height: '36px', backgroundColor: '#0d6efd' }}
                       disabled={!messageText.trim() || isSending}
                       title="Send message"
                     >
-                      <i className="bi bi-send-fill text-white" style={{ fontSize: '0.85rem' }}></i>
+                      {isSending ? (
+                        <span className="spinner-border spinner-border-sm text-white" role="status"></span>
+                      ) : (
+                        <i className="bi bi-send-fill text-white" style={{ fontSize: '0.9rem', marginLeft: '1px' }}></i>
+                      )}
                     </button>
                   </div>
                 </form>

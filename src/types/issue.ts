@@ -60,6 +60,8 @@ export interface DiscussionMessage {
     url?: string;
   };
   reaction?: string;
+  isEdited?: boolean;
+  editedAt?: string;
 }
 
 export interface Issue {

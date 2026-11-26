@@ -1,15 +1,6 @@
 import { Issue, DiscussionMessage, ProjectItem, DeveloperItem, PaginatedIssuesResponse, FetchIssuesParams } from '../../types/issue';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
-
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('resolvehub_auth_token');
-  return {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
-}
+import { API_BASE_URL, getAuthHeaders } from './apiClient';
 
 /**
  * Normalizes backend issue payload (snake_case matching ERD or camelCase) into frontend Issue model
@@ -1062,7 +1053,9 @@ export function normalizeDiscussionMessage(m: any, defaultIssueId: string): Disc
     createdAt: m.created_at || '',
     timestamp,
     attachment: m.attachment,
-    reaction: m.reaction
+    reaction: m.reaction,
+    isEdited: Boolean(m.is_edited || m.isEdited || m.edited_at || m.editedAt),
+    editedAt: m.edited_at || m.editedAt || undefined
   };
 }
 
@@ -1217,5 +1210,67 @@ export async function apiSendMessage(
   } catch (err) {
     console.error('[apiSendMessage] Error:', err);
     return { success: false };
+  }
+}
+
+/**
+ * Update an existing discussion message within the 15-minute edit window
+ */
+export async function apiUpdateMessage(
+  issueId: string,
+  messageId: string,
+  updatedText: string
+): Promise<{ success: boolean; message?: DiscussionMessage; error?: string }> {
+  try {
+    const endpoints = [
+      `${API_BASE_URL}/my-issues/${issueId}/messages/${messageId}`,
+      `${API_BASE_URL}/issues/${issueId}/messages/${messageId}`,
+      `${API_BASE_URL}/previous-issues/${issueId}/messages/${messageId}`,
+      `${API_BASE_URL}/messages/${messageId}`
+    ];
+
+    const payload = {
+      markdown: updatedText,
+      message: updatedText
+    };
+
+    let response: Response | null = null;
+    let data: any = null;
+
+    for (const url of endpoints) {
+      // 1. Try PATCH
+      response = await fetch(url, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      }).catch(() => null);
+
+      // 2. If 404 or 405 Method Not Allowed, try PUT
+      if (!response || response.status === 404 || response.status === 405) {
+        response = await fetch(url, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload)
+        }).catch(() => null);
+      }
+
+      if (response && response.ok) {
+        data = await response.json().catch(() => null);
+        break;
+      }
+    }
+
+    const item = Array.isArray(data) ? data[0] : (data?.data || data);
+    const normalized = item
+      ? normalizeDiscussionMessage(item, issueId)
+      : undefined;
+
+    return {
+      success: true,
+      message: normalized
+    };
+  } catch (err: any) {
+    console.error('[apiUpdateMessage] Error updating message:', err);
+    return { success: false, error: err?.message };
   }
 }
