@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Issue, DiscussionMessage } from '../../types/issue';
 import { apiFetchIssueById, apiFetchMessages, apiSendMessage, apiUpdateMessage } from '../../services/api/issueService';
 import { useIssueMessagesWebSocket } from '../../hooks/useIssueMessagesWebSocket';
+import { IssueAuditLogs } from '../../components/issues/IssueAuditLogs';
 
 const PROJECT_OPTIONS = [
   'Nokia Production Dashboard',
@@ -126,6 +127,7 @@ export const IssueDetailsPage: React.FC = () => {
     DEFAULT_THREAD_MESSAGES.map((m) => ({ ...m, issueId: id || '' }))
   );
   const [messageText, setMessageText] = useState<string>('');
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
   const [isSending, setIsSending] = useState<boolean>(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -201,7 +203,7 @@ export const IssueDetailsPage: React.FC = () => {
   // Scroll chat to bottom when messages update
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  }, [messages.length, showAuditLogs]);
 
   const handleBack = () => {
     navigate(backPath);
@@ -914,7 +916,33 @@ export const IssueDetailsPage: React.FC = () => {
           {/* ================= RIGHT COLUMN (~41%): INCIDENT COLLABORATION THREAD ================= */}
           <div className="col-12 col-lg-5 d-flex flex-column details-column h-100 min-h-0">
             <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
+              <div className="nav nav-tabs nav-fill bg-light flex-shrink-0" role="group" aria-label="Issue activity">
+                <button
+                  type="button"
+                  className={`nav-link small ${showAuditLogs ? 'text-secondary' : 'active text-primary'}`}
+                  aria-pressed={!showAuditLogs}
+                  aria-controls="issue-messages"
+                  onClick={() => setShowAuditLogs(false)}
+                >
+                  <i className="bi bi-chat-dots me-1" aria-hidden="true"></i>
+                  Messages
+                </button>
+                <button
+                  type="button"
+                  className={`nav-link small ${showAuditLogs ? 'active text-primary' : 'text-secondary'}`}
+                  aria-pressed={showAuditLogs}
+                  aria-controls="issue-audit-panel"
+                  onClick={() => setShowAuditLogs(true)}
+                >
+                  <i className="bi bi-clock-history me-1" aria-hidden="true"></i>
+                  Audit Logs
+                </button>
+              </div>
 
+              <div id="issue-audit-panel" className={showAuditLogs ? 'd-flex flex-column flex-grow-1 min-h-0' : 'd-none'}>
+                {showAuditLogs && <IssueAuditLogs key={`${sourceHint}:${issue.id}`} issueId={issue.id} scope={sourceHint} />}
+              </div>
+              <div id="issue-messages" style={{ display: showAuditLogs ? 'none' : 'contents' }}>
               {/* Thread Header */}
               <div className="p-3 border-bottom d-flex align-items-center justify-content-between bg-white flex-shrink-0">
                 <div className="d-flex align-items-center gap-2.5">
@@ -1221,6 +1249,7 @@ export const IssueDetailsPage: React.FC = () => {
                 </form>
               </div>
 
+              </div>
             </div>
           </div>
 
