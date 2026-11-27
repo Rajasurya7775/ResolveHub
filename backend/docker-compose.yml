@@ -11,5 +11,10 @@ services:
 
       DATABASE_URL: postgresql+psycopg://admin:admin123@host.docker.internal:5432/mydatabase
       SECRET_KEY: 481103fe87a1ffab16334d18d52a5286e2b371ea2a949d802ece1e6034feced4
+      APPWRITE_S3_ENDPOINT: ${APPWRITE_S3_ENDPOINT:-}
+      APPWRITE_S3_REGION: ${APPWRITE_S3_REGION:-}
+      APPWRITE_S3_ACCESS_KEY_ID: ${APPWRITE_S3_ACCESS_KEY_ID:-}
+      APPWRITE_S3_SECRET_ACCESS_KEY: ${APPWRITE_S3_SECRET_ACCESS_KEY:-}
+      APPWRITE_S3_BUCKET: ${APPWRITE_S3_BUCKET:-}
 
     restart: unless-stopped

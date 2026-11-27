@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from redis.asyncio import Redis
 from app.api.v1.router import api_router
 from app.api.v1.endpoints.issue_chat_ws import issue_chat_websocket
 from app.core.config import get_redis_url
+from app.services.issue_attachment_service import run_attachment_cleanup
 
 
 @asynccontextmanager
@@ -15,7 +17,13 @@ async def lifespan(app: FastAPI):
         get_redis_url(), socket_connect_timeout=2, socket_timeout=3
     ) as redis:
         app.state.dashboard_redis = redis
-        yield
+        cleanup_task = asyncio.create_task(run_attachment_cleanup())
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
 
 
 # 1. Create FastAPI application

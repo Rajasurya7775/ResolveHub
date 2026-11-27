@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.message_attachment import IssueMessageAttachment
     from app.models.issue import Issue
     from app.models.user import User
 
@@ -38,3 +39,6 @@ class IssueMessage(Base):
 
     issue: Mapped["Issue"] = relationship(back_populates="messages")
     sender: Mapped["User"] = relationship(back_populates="messages")
+    attachments: Mapped[list["IssueMessageAttachment"]] = relationship(
+        passive_deletes="all", order_by="IssueMessageAttachment.created_at, IssueMessageAttachment.attachment_id"
+    )

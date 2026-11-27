@@ -3,9 +3,12 @@ from datetime import date
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 from sqlalchemy.orm import Session
 
 from app.api.v1.endpoints.audit_sse import router as audit_sse_router
@@ -22,6 +25,12 @@ from app.schemas.issue_message import (
     IssueMessageCreate,
 )
 
+from app.services.issue_attachment_service import (
+    create_attachment_message,
+    delete_attachment,
+    open_attachment,
+)
+from app.services.attachment_validation import MAX_ATTACHMENTS, MAX_FILE_SIZE
 from app.services.audit_log_service import list_issue_audit_logs
 from app.services.my_issue_service import get_my_issues
 from app.services.issue_service import (
@@ -33,6 +42,7 @@ from app.services.issue_message_service import (
     edit_issue_message,
     get_issue_messages,
     save_issue_message,
+    verify_issue_chat_access,
 )
 
 from app.api.deps import get_current_user
@@ -185,6 +195,120 @@ async def send_my_issue_message(
         )
 
     return saved_message
+
+
+async def limited_attachment_body(request: Request):
+    max_request_size = MAX_ATTACHMENTS * MAX_FILE_SIZE + 256 * 1024
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > max_request_size:
+            raise HTTPException(413, "Attachment request is too large")
+        yield chunk
+
+
+@router.post(
+    "/{issue_id}/messages/attachments",
+    response_model=IssueMessageResponse,
+    status_code=201,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["files"],
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                                "minItems": 1,
+                                "maxItems": MAX_ATTACHMENTS,
+                            },
+                            "markdown": {"type": "string", "maxLength": 10000},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def send_attachment_message(
+    issue_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await run_in_threadpool(verify_issue_chat_access, db, current_user, issue_id)
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "multipart/form-data":
+        raise HTTPException(415, "Expected multipart/form-data")
+    parser = MultiPartParser(
+        request.headers,
+        limited_attachment_body(request),
+        max_files=MAX_ATTACHMENTS,
+        max_fields=1,
+        max_part_size=40_000,
+    )
+    try:
+        form = await parser.parse()
+    except MultiPartException as exc:
+        raise HTTPException(422, exc.message) from exc
+    try:
+        files = form.getlist("files")
+        markdown = form.get("markdown", "")
+        if (
+            form.keys() - {"files", "markdown"}
+            or not all(isinstance(file, UploadFile) for file in files)
+            or not isinstance(markdown, str)
+        ):
+            raise HTTPException(422, "Use files for uploads and markdown for optional text")
+        message = await run_in_threadpool(
+            create_attachment_message, db, current_user, issue_id, markdown, files
+        )
+    finally:
+        await form.close()
+    try:
+        await chat_manager.broadcast(issue_id, {"event": "new_message", "data": message})
+    except Exception:
+        logger.exception("Attachment message saved, but chat broadcast failed")
+    return message
+
+
+@router.get("/{issue_id}/messages/attachments/{attachment_id}")
+def read_attachment(
+    issue_id: UUID,
+    attachment_id: UUID,
+    download: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    body, content_type, headers = open_attachment(db, current_user, issue_id, attachment_id, download)
+
+    async def chunks():
+        try:
+            while chunk := await run_in_threadpool(body.read, 64 * 1024):
+                yield chunk
+        finally:
+            body.close()
+
+    return StreamingResponse(chunks(), media_type=content_type, headers=headers)
+
+
+@router.delete("/{issue_id}/messages/attachments/{attachment_id}", status_code=204)
+async def remove_attachment(
+    issue_id: UUID,
+    attachment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    event = await run_in_threadpool(delete_attachment, db, current_user, issue_id, attachment_id)
+    if event is not None:
+        try:
+            await chat_manager.broadcast(issue_id, {"event": "attachment_deleted", "data": event})
+        except Exception:
+            logger.exception("Attachment deleted, but chat broadcast failed")
+    return Response(status_code=204)
 
 
 # --------------------------------------------------

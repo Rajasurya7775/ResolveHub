@@ -50,6 +50,20 @@ def format_message(message: IssueMessage) -> dict:
         "markdown": message.markdown,
         "created_at": message.created_at,
         "updated_at": message.updated_at,
+        "attachments": [
+            {
+                "attachment_id": attachment.attachment_id,
+                "file_name": attachment.original_file_name,
+                "content_type": attachment.content_type,
+                "file_size": attachment.file_size,
+                "view_url": (
+                    f"/api/v1/my-issues/{message.issue_id}/messages/attachments/"
+                    f"{attachment.attachment_id}"
+                ),
+            }
+            for attachment in message.attachments
+            if attachment.deleted_at is None
+        ],
         "is_edited": (
             message.updated_at is not None and message.updated_at > message.created_at
         ),
@@ -69,7 +83,7 @@ def list_issue_messages(db: Session, issue_id: UUID) -> list[dict]:
     """Load message history after the caller has verified read access."""
     query = (
         select(IssueMessage)
-        .options(selectinload(IssueMessage.sender))
+        .options(selectinload(IssueMessage.sender), selectinload(IssueMessage.attachments))
         .where(IssueMessage.issue_id == issue_id)
         .order_by(IssueMessage.created_at.asc(), IssueMessage.id.asc())
     )
@@ -109,23 +123,17 @@ def save_issue_message(
 
     message = IssueMessage(
         issue_id=issue.issue_id,
-        sender_id=current_user.user_id,
+        sender=current_user,
         markdown=markdown,
+        attachments=[],
     )
 
     try:
         db.add(message)
+        db.flush()
+        result = format_message(message)
         db.commit()
-        db.refresh(message)
-
-        # Load the sender relationship for the response.
-        saved_message = db.scalar(
-            select(IssueMessage)
-            .options(selectinload(IssueMessage.sender))
-            .where(IssueMessage.id == message.id)
-        )
-
-        return format_message(saved_message)
+        return result
 
     except Exception:
         db.rollback()
@@ -145,7 +153,7 @@ def edit_issue_message(
     try:
         message = db.scalar(
             select(IssueMessage)
-            .options(selectinload(IssueMessage.sender))
+            .options(selectinload(IssueMessage.sender), selectinload(IssueMessage.attachments))
             .where(IssueMessage.issue_id == issue_id, IssueMessage.id == message_id)
             .with_for_update()
         )
