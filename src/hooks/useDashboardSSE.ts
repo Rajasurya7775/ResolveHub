@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { API_BASE_URL } from '../services/api/apiClient';
+import { API_BASE_URL, getAuthToken } from '../services/api/apiClient';
 
-const DEBOUNCE_COOLDOWN_MS = 300;     // Prevent duplicate API calls on message bursts
-const FALLBACK_POLL_INTERVAL_MS = 30000; // Background fallback sync if SSE is offline
+const INITIAL_RECONNECT_DELAY_MS = 1000; // 1 second initial delay
+const MAX_RECONNECT_DELAY_MS = 30000;     // 30 seconds maximum delay
+const BACKOFF_FACTOR = 2;
+const DEBOUNCE_COOLDOWN_MS = 300;         // Prevent duplicate API refresh calls on rapid event bursts
+
+export type SSEConnectionState = 'connected' | 'disconnected' | 'reconnecting' | 'error';
+
+export interface DashboardSSEEvent {
+  event: string;
+  data: unknown;
+  id?: string;
+}
 
 export interface DashboardSSEOptions {
   url?: string | null;
@@ -10,21 +20,21 @@ export interface DashboardSSEOptions {
 }
 
 export interface DashboardSSEReturn {
+  connectionState: SSEConnectionState;
   isConnected: boolean;
-  lastEvent: any;
+  error: string | null;
+  lastEvent: DashboardSSEEvent | null;
   reconnect: () => void;
+  disconnect: () => void;
 }
 
 /**
- * Resolves the primary SSE endpoint URL for dashboard events.
- * Priority:
- * 1. customUrl passed directly to the hook
- * 2. VITE_SSE_URL in environment variables
- * 3. ${API_BASE_URL}/dashboard/events
+ * Resolves the SSE endpoint URL for dashboard live updates.
+ * Defaults to `${API_BASE_URL}/dashboard/events` (e.g. http://10.x.x.x:8003/api/v1/dashboard/events).
  */
 export function getDashboardSSEUrl(customUrl: string | null = null): string {
-  if (customUrl) {
-    return customUrl;
+  if (customUrl && customUrl.trim()) {
+    return customUrl.trim();
   }
 
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SSE_URL) {
@@ -34,165 +44,372 @@ export function getDashboardSSEUrl(customUrl: string | null = null): string {
     }
   }
 
-  const base = API_BASE_URL.replace(/\/+$/, '');
-  return `${base}/dashboard/events`;
+  return `${API_BASE_URL}/dashboard/events`;
+}
+
+/**
+ * Parses raw SSE event data safely without throwing on malformed payloads.
+ */
+function safeParseEventData(rawData: string): unknown {
+  const trimmed = rawData.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
 }
 
 /**
  * Custom React Hook: useDashboardSSE
  *
- * Establishes a real-time Server-Sent Events (SSE) connection with the backend
- * endpoint `/api/v1/dashboard/events`. Automatically triggers `onDashboardUpdated`
- * whenever new dashboard events, issue modifications, or metric updates arrive.
+ * Connects to the backend Server-Sent Events (SSE) endpoint to receive live dashboard updates.
+ * - Uses native EventSource (withCredentials: true) when no Bearer header is required.
+ * - Uses authenticated fetch streaming (Authorization: Bearer <token>, without exposing tokens
+ *   in URL query strings) when a Bearer token is stored in localStorage.
+ * - Handles exponential reconnection backoff (1s initial up to 30s max) and debounces rapid bursts.
  */
 export function useDashboardSSE(
-  onDashboardUpdated: (payload?: any) => void,
+  onDashboardUpdated: (event?: DashboardSSEEvent) => void,
   options: DashboardSSEOptions = {}
 ): DashboardSSEReturn {
   const { url = null, enabled = true } = options;
 
-  const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [lastEvent, setLastEvent] = useState<any>(null);
+  const [connectionState, setConnectionState] = useState<SSEConnectionState>(
+    enabled ? 'reconnecting' : 'disconnected'
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [lastEvent, setLastEvent] = useState<DashboardSSEEvent | null>(null);
 
-  // Maintain latest callback via useRef to avoid re-triggering connection effect
-  const callbackRef = useRef<(payload?: any) => void>(onDashboardUpdated);
+  const callbackRef = useRef<(event?: DashboardSSEEvent) => void>(onDashboardUpdated);
   useEffect(() => {
     callbackRef.current = onDashboardUpdated;
   }, [onDashboardUpdated]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
-  const lastFiredTimeRef = useRef<number>(0);
-  const debounceTimerRef = useRef<any>(null);
-  const fallbackPollTimerRef = useRef<any>(null);
-  const [reconnectCounter, setReconnectCounter] = useState<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDelayRef = useRef<number>(INITIAL_RECONNECT_DELAY_MS);
+  const isUnmountedRef = useRef<boolean>(false);
+  const isConnectingRef = useRef<boolean>(false);
+  const lastTriggerTimeRef = useRef<number>(0);
 
-  // Debounced callback invocation to prevent burst floods
-  const triggerUpdate = useCallback((payload?: any) => {
-    const now = Date.now();
-    const timeSinceLast = now - lastFiredTimeRef.current;
-
-    if (timeSinceLast >= DEBOUNCE_COOLDOWN_MS) {
-      lastFiredTimeRef.current = now;
-      try {
-        callbackRef.current?.(payload);
-      } catch (err) {
-        console.error('[useDashboardSSE] Error executing update callback:', err);
-      }
-    } else {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      debounceTimerRef.current = setTimeout(() => {
-        lastFiredTimeRef.current = Date.now();
-        try {
-          callbackRef.current?.(payload);
-        } catch (err) {
-          console.error('[useDashboardSSE] Error executing debounced callback:', err);
-        }
-      }, DEBOUNCE_COOLDOWN_MS - timeSinceLast);
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimeoutRef.current !== null) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
   }, []);
 
-  // Manual reconnect trigger
-  const reconnect = useCallback(() => {
-    setReconnectCounter((prev) => prev + 1);
-  }, []);
-
-  useEffect(() => {
-    if (!enabled) {
-      setIsConnected(false);
-      return;
-    }
-
-    const sseUrl = getDashboardSSEUrl(url);
-
-    // Close any previous connection
+  const closeActiveTransport = useCallback(() => {
     if (eventSourceRef.current) {
+      eventSourceRef.current.onopen = null;
+      eventSourceRef.current.onmessage = null;
+      eventSourceRef.current.onerror = null;
       try {
         eventSourceRef.current.close();
-      } catch {}
+      } catch {
+        // ignore close errors
+      }
       eventSourceRef.current = null;
     }
 
-    try {
-      const eventSource = new EventSource(sseUrl);
-      eventSourceRef.current = eventSource;
-
-      eventSource.onopen = () => {
-        setIsConnected(true);
-      };
-
-      // 1. Generic message handler
-      eventSource.onmessage = (event) => {
-        try {
-          const data = event.data ? JSON.parse(event.data) : {};
-          setLastEvent(data);
-          triggerUpdate(data);
-        } catch {
-          setLastEvent(event.data);
-          triggerUpdate({ raw: event.data });
-        }
-      };
-
-      // 2. Named custom event listeners supported by FastAPI SSE
-      const handleNamedEvent = (event: any) => {
-        try {
-          const data = event.data ? JSON.parse(event.data) : {};
-          setLastEvent(data);
-          triggerUpdate(data);
-        } catch {
-          triggerUpdate();
-        }
-      };
-
-      eventSource.addEventListener('dashboard_updated', handleNamedEvent);
-      eventSource.addEventListener('issue_created', handleNamedEvent);
-      eventSource.addEventListener('issue_updated', handleNamedEvent);
-      eventSource.addEventListener('issue_resolved', handleNamedEvent);
-      eventSource.addEventListener('metric_update', handleNamedEvent);
-
-      // Keepalive ping from server
-      eventSource.addEventListener('ping', () => {
-        setIsConnected(true);
-      });
-
-      eventSource.onerror = (err) => {
-        console.warn(`[useDashboardSSE] SSE disconnected from ${sseUrl}:`, err);
-        setIsConnected(false);
-      };
-    } catch (err) {
-      console.warn('[useDashboardSSE] Failed to instantiate EventSource:', err);
-      setIsConnected(false);
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch {
+        // ignore abort errors
+      }
+      abortControllerRef.current = null;
     }
 
-    // 3. Fallback polling interval: if SSE drops, poll every 30s to keep metrics fresh
-    fallbackPollTimerRef.current = setInterval(() => {
-      if (!eventSourceRef.current || eventSourceRef.current.readyState !== EventSource.OPEN) {
-        triggerUpdate({ fallback: true });
+    isConnectingRef.current = false;
+  }, []);
+
+  const triggerRefresh = useCallback((sseEvent: DashboardSSEEvent) => {
+    const now = Date.now();
+    setLastEvent(sseEvent);
+
+    if (now - lastTriggerTimeRef.current < DEBOUNCE_COOLDOWN_MS) {
+      return;
+    }
+    lastTriggerTimeRef.current = now;
+
+    if (typeof callbackRef.current === 'function') {
+      try {
+        callbackRef.current(sseEvent);
+      } catch (err) {
+        console.error('[useDashboardSSE] Error executing dashboard refresh callback:', err);
       }
-    }, FALLBACK_POLL_INTERVAL_MS);
+    }
+  }, []);
+
+  const scheduleReconnect = useCallback(
+    (connectFn: () => void) => {
+      if (isUnmountedRef.current || !enabled) return;
+      if (reconnectTimeoutRef.current !== null) return;
+
+      const delay = reconnectDelayRef.current;
+      reconnectDelayRef.current = Math.min(
+        reconnectDelayRef.current * BACKOFF_FACTOR,
+        MAX_RECONNECT_DELAY_MS
+      );
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        if (!isUnmountedRef.current && enabled) {
+          setConnectionState('reconnecting');
+          connectFn();
+        }
+      }, delay);
+    },
+    [enabled]
+  );
+
+  const connect = useCallback(() => {
+    if (!enabled || isUnmountedRef.current) {
+      setConnectionState('disconnected');
+      return;
+    }
+
+    // Prevent duplicate concurrent connections
+    if (
+      isConnectingRef.current ||
+      abortControllerRef.current !== null ||
+      (eventSourceRef.current &&
+        (eventSourceRef.current.readyState === EventSource.OPEN ||
+          eventSourceRef.current.readyState === EventSource.CONNECTING))
+    ) {
+      return;
+    }
+
+    const targetUrl = getDashboardSSEUrl(url);
+    const token = getAuthToken();
+
+    isConnectingRef.current = true;
+    clearReconnectTimer();
+
+    // Native EventSource cannot attach custom Authorization headers and tokens must never
+    // be placed in URL query strings. Use authenticated fetch SSE stream when a Bearer token
+    // is stored, and native EventSource with cookie credentials otherwise.
+    if (!token && typeof EventSource !== 'undefined') {
+      try {
+        const es = new EventSource(targetUrl, { withCredentials: true });
+        eventSourceRef.current = es;
+
+        es.onopen = () => {
+          if (isUnmountedRef.current) {
+            es.close();
+            return;
+          }
+          isConnectingRef.current = false;
+          reconnectDelayRef.current = INITIAL_RECONNECT_DELAY_MS;
+          setError(null);
+          setConnectionState('connected');
+        };
+
+        es.onmessage = (event: MessageEvent) => {
+          if (isUnmountedRef.current) return;
+          if (typeof event.data !== 'string' || !event.data.trim()) return;
+
+          const parsed = safeParseEventData(event.data);
+          triggerRefresh({
+            event: event.type || 'message',
+            data: parsed,
+            id: event.lastEventId || undefined
+          });
+        };
+
+        es.onerror = () => {
+          if (isUnmountedRef.current) return;
+          closeActiveTransport();
+          setError('Dashboard SSE connection interrupted.');
+          setConnectionState('error');
+          scheduleReconnect(connect);
+        };
+      } catch (err: any) {
+        closeActiveTransport();
+        setError(err?.message || 'Failed to open dashboard EventSource connection.');
+        setConnectionState('error');
+        scheduleReconnect(connect);
+      }
+      return;
+    }
+
+    // Authenticated SSE stream over fetch (preserves Authorization: Bearer without query tokens)
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    (async () => {
+      try {
+        const headers: Record<string, string> = {
+          Accept: 'text/event-stream',
+          'Cache-Control': 'no-cache'
+        };
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(targetUrl, {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+          signal: controller.signal
+        });
+
+        if (isUnmountedRef.current || controller.signal.aborted) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(`SSE endpoint returned HTTP ${response.status}`);
+        }
+
+        if (!response.body) {
+          throw new Error('SSE response stream body is unavailable.');
+        }
+
+        isConnectingRef.current = false;
+        reconnectDelayRef.current = INITIAL_RECONNECT_DELAY_MS;
+        setError(null);
+        setConnectionState('connected');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let currentEventName = 'message';
+        let currentEventId: string | undefined;
+        let dataLines: string[] = [];
+
+        const dispatchBufferedEvent = () => {
+          if (dataLines.length === 0) {
+            currentEventName = 'message';
+            currentEventId = undefined;
+            return;
+          }
+
+          const rawPayload = dataLines.join('\n');
+          const eventName = currentEventName || 'message';
+          const eventId = currentEventId;
+
+          currentEventName = 'message';
+          currentEventId = undefined;
+          dataLines = [];
+
+          if (!rawPayload.trim()) return;
+
+          const parsed = safeParseEventData(rawPayload);
+          triggerRefresh({
+            event: eventName,
+            data: parsed,
+            id: eventId
+          });
+        };
+
+        while (!isUnmountedRef.current && !controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) {
+            dispatchBufferedEvent();
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r\n|\n|\r/);
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (line === '') {
+              dispatchBufferedEvent();
+              continue;
+            }
+
+            // Ignore SSE comment / keepalive lines
+            if (line.startsWith(':')) {
+              continue;
+            }
+
+            const colonIdx = line.indexOf(':');
+            const field = colonIdx === -1 ? line : line.slice(0, colonIdx);
+            const rawValue = colonIdx === -1 ? '' : line.slice(colonIdx + 1);
+            const val = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue;
+
+            if (field === 'event') {
+              currentEventName = val || 'message';
+            } else if (field === 'data') {
+              dataLines.push(val);
+            } else if (field === 'id') {
+              currentEventId = val;
+            } else if (field === 'retry') {
+              const serverRetry = Number(val);
+              if (Number.isFinite(serverRetry) && serverRetry > 0) {
+                reconnectDelayRef.current = Math.min(
+                  Math.max(serverRetry, INITIAL_RECONNECT_DELAY_MS),
+                  MAX_RECONNECT_DELAY_MS
+                );
+              }
+            }
+          }
+        }
+
+        // Stream closed cleanly or unexpectedly by server
+        if (!isUnmountedRef.current && !controller.signal.aborted && enabled) {
+          closeActiveTransport();
+          setError('Dashboard SSE stream closed by server.');
+          setConnectionState('error');
+          scheduleReconnect(connect);
+        }
+      } catch (err: any) {
+        if (isUnmountedRef.current || controller.signal.aborted || err?.name === 'AbortError') {
+          return;
+        }
+        closeActiveTransport();
+        setError(err?.message || 'Dashboard SSE connection error.');
+        setConnectionState('error');
+        scheduleReconnect(connect);
+      }
+    })();
+  }, [enabled, url, clearReconnectTimer, closeActiveTransport, triggerRefresh, scheduleReconnect]);
+
+  const disconnect = useCallback(() => {
+    clearReconnectTimer();
+    closeActiveTransport();
+    setConnectionState('disconnected');
+  }, [clearReconnectTimer, closeActiveTransport]);
+
+  const reconnect = useCallback(() => {
+    clearReconnectTimer();
+    closeActiveTransport();
+    reconnectDelayRef.current = INITIAL_RECONNECT_DELAY_MS;
+    setError(null);
+    if (enabled && !isUnmountedRef.current) {
+      setConnectionState('reconnecting');
+      connect();
+    }
+  }, [clearReconnectTimer, closeActiveTransport, connect, enabled]);
+
+  useEffect(() => {
+    isUnmountedRef.current = false;
+    if (enabled) {
+      setConnectionState('reconnecting');
+      connect();
+    } else {
+      disconnect();
+    }
 
     return () => {
-      if (eventSourceRef.current) {
-        try {
-          eventSourceRef.current.close();
-        } catch {}
-        eventSourceRef.current = null;
-      }
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      if (fallbackPollTimerRef.current) {
-        clearInterval(fallbackPollTimerRef.current);
-      }
-      setIsConnected(false);
+      isUnmountedRef.current = true;
+      clearReconnectTimer();
+      closeActiveTransport();
     };
-  }, [enabled, url, reconnectCounter, triggerUpdate]);
+  }, [enabled, connect, disconnect, clearReconnectTimer, closeActiveTransport]);
 
   return {
-    isConnected,
+    connectionState,
+    isConnected: connectionState === 'connected',
+    error,
     lastEvent,
-    reconnect
+    reconnect,
+    disconnect
   };
 }
 

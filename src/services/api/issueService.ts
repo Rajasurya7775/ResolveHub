@@ -14,9 +14,9 @@ export function normalizeIssue(item: any): Issue {
     : (desc.length > 85 ? `${desc.substring(0, 85)}...` : desc);
 
   // Normalize status
-  let rawStatus = item.issue_status || item.status || 'Open';
-  let status: any = 'Open';
-  if (typeof rawStatus === 'string') {
+  const rawStatus = item.issue_status || item.status || '';
+  let status: any = '';
+  if (typeof rawStatus === 'string' && rawStatus.trim()) {
     const s = rawStatus.trim().toUpperCase();
     if (s === 'OPEN') status = 'Open';
     else if (s === 'ACCEPTED') status = 'Accepted';
@@ -55,55 +55,88 @@ export function normalizeIssue(item: any): Issue {
     projectId = item.projectId;
   }
 
-  projectName = projectName || projectId || 'Nokia Production Dashboard';
-  projectId = projectId || projectName;
+  projectName = projectName || projectId || '';
+  projectId = projectId || projectName || '';
 
   // Normalize Title
-  let title = 'Untitled Issue';
+  let title = '';
   if (typeof item.issue_title === 'string') title = item.issue_title;
   else if (typeof item.title === 'string') title = item.title;
 
   // Normalize Issue Type
-  let issueType = 'Front-end';
+  let issueType = '';
   if (typeof item.issue_type === 'string') issueType = item.issue_type;
   else if (typeof item.issueType === 'string') issueType = item.issueType;
   else if (item.issue_type && typeof item.issue_type === 'object') {
-    issueType = item.issue_type.name || item.issue_type.type || 'Front-end';
+    issueType = item.issue_type.name || item.issue_type.type || '';
   }
 
   // Normalize Shift
-  let shift = 'Shift-A';
+  let shift = '';
   if (typeof item.issue_shift === 'string') shift = item.issue_shift;
   else if (typeof item.shift === 'string') shift = item.shift;
   else if (item.issue_shift && typeof item.issue_shift === 'object') {
-    shift = item.issue_shift.name || 'Shift-A';
+    shift = item.issue_shift.name || '';
   }
 
   // Normalize Reporter
-  let reportedBy = 'Supporter';
+  let reportedBy = '';
   if (typeof item.created_by_name === 'string') reportedBy = item.created_by_name;
   else if (typeof item.reportedBy === 'string') reportedBy = item.reportedBy;
   else if (typeof item.creator_name === 'string') reportedBy = item.creator_name;
   else if (item.created_by && typeof item.created_by === 'object') {
-    reportedBy = item.created_by.name || item.created_by.username || 'Supporter';
+    reportedBy = item.created_by.full_name || item.created_by.name || item.created_by.username || '';
   } else if (typeof item.created_by === 'string') {
     reportedBy = item.created_by;
   }
 
-  // Normalize Developer Assignee
+  // Normalize Developer Assignee & ID
   let acceptedDeveloper = 'Unassigned';
-  if (typeof item.accepted_developer_name === 'string') acceptedDeveloper = item.accepted_developer_name;
-  else if (typeof item.assigned_to_name === 'string') acceptedDeveloper = item.assigned_to_name;
-  else if (typeof item.acceptedDeveloper === 'string') acceptedDeveloper = item.acceptedDeveloper;
-  else if (typeof item.assigned_to === 'string') acceptedDeveloper = item.assigned_to;
-  else if (item.accepted_developer && typeof item.accepted_developer === 'object') {
-    acceptedDeveloper = item.accepted_developer.name || item.accepted_developer.username || 'Unassigned';
+  let acceptedDeveloperId: string | undefined =
+    item.accepted_by != null
+      ? String(item.accepted_by)
+      : item.assigned_to_id != null
+        ? String(item.assigned_to_id)
+        : item.acceptedDeveloperId != null
+          ? String(item.acceptedDeveloperId)
+          : item.assignedToId != null
+            ? String(item.assignedToId)
+            : undefined;
+
+  if (typeof item.accepted_developer_name === 'string' && item.accepted_developer_name.trim()) {
+    acceptedDeveloper = item.accepted_developer_name;
+  } else if (typeof item.assigned_to_name === 'string' && item.assigned_to_name.trim()) {
+    acceptedDeveloper = item.assigned_to_name;
+  } else if (typeof item.acceptedDeveloper === 'string' && item.acceptedDeveloper.trim()) {
+    acceptedDeveloper = item.acceptedDeveloper;
+  } else if (typeof item.assignedTo === 'string' && item.assignedTo.trim()) {
+    acceptedDeveloper = item.assignedTo;
+  } else if (item.accepted_developer && typeof item.accepted_developer === 'object') {
+    acceptedDeveloper =
+      item.accepted_developer.full_name ||
+      item.accepted_developer.name ||
+      item.accepted_developer.username ||
+      'Unassigned';
+    if (!acceptedDeveloperId && (item.accepted_developer.user_id != null || item.accepted_developer.id != null)) {
+      acceptedDeveloperId = String(item.accepted_developer.user_id ?? item.accepted_developer.id);
+    }
   } else if (item.assigned_to && typeof item.assigned_to === 'object') {
-    acceptedDeveloper = item.assigned_to.name || item.assigned_to.username || 'Unassigned';
+    acceptedDeveloper =
+      item.assigned_to.full_name ||
+      item.assigned_to.name ||
+      item.assigned_to.username ||
+      'Unassigned';
+    if (!acceptedDeveloperId && (item.assigned_to.user_id != null || item.assigned_to.id != null)) {
+      acceptedDeveloperId = String(item.assigned_to.user_id ?? item.assigned_to.id);
+    }
+  } else if (typeof item.assigned_to === 'string' && item.assigned_to.trim()) {
+    acceptedDeveloper = item.assigned_to;
+  } else if (typeof item.assigned_to === 'number') {
+    acceptedDeveloperId = acceptedDeveloperId || String(item.assigned_to);
   }
 
   // Normalize Reported Date
-  let reportedDate = new Date().toISOString().split('T')[0];
+  let reportedDate = '';
   if (typeof item.issue_created_at === 'string') {
     reportedDate = item.issue_created_at.split('T')[0];
   } else if (typeof item.created_at === 'string') {
@@ -119,7 +152,7 @@ export function normalizeIssue(item: any): Issue {
   const rawIssueNumber = item.issue_number != null ? String(item.issue_number) : (item.issueNumber != null ? String(item.issueNumber) : '');
 
   // The primary unique ID for API calls (PATCH / DELETE / GET by id) is the UUID
-  const id = rawIssueId || rawIssueNumber || `ISS-${Date.now()}`;
+  const id = rawIssueId || rawIssueNumber || '';
   // The display ticket code is the issue_number
   const issueNumber = rawIssueNumber || (rawIssueId && rawIssueId.length > 20 ? `RES-${rawIssueId.substring(0, 4).toUpperCase()}` : rawIssueId || id);
 
@@ -135,17 +168,18 @@ export function normalizeIssue(item: any): Issue {
     shortDescription: shortDesc,
     description: desc,
     issueType,
-    occurrenceTime: typeof item.issue_time === 'string' ? item.issue_time : (typeof item.occurrenceTime === 'string' ? item.occurrenceTime : new Date().toISOString()),
+    occurrenceTime: typeof item.issue_time === 'string' ? item.issue_time : (typeof item.occurrenceTime === 'string' ? item.occurrenceTime : ''),
     shift,
     reportedBy,
     reportedById: String(item.issue_created_by || item.reportedById || item.employee_id || ''),
     reportedDate,
     acceptedDeveloper,
-    acceptedDeveloperId: item.accepted_by ? String(item.accepted_by) : (item.assigned_to_id || item.acceptedDeveloperId),
+    acceptedDeveloperId,
     acceptedDate: item.accepted_at || item.acceptedDate,
     status,
-    priority: typeof item.issue_priority === 'string' ? item.issue_priority : (typeof item.priority === 'string' ? item.priority : 'P2 – Moderate'),
+    priority: typeof item.issue_priority === 'string' ? item.issue_priority : (typeof item.priority === 'string' ? item.priority : ''),
     assignedTo: acceptedDeveloper,
+    assignedToId: acceptedDeveloperId,
     rca: typeof item.rca === 'string' ? item.rca : undefined,
     resolvedDate: typeof item.resolved_at === 'string' ? item.resolved_at : (typeof item.resolvedDate === 'string' ? item.resolvedDate : undefined),
     isEligibleForDelete: status === 'Open'
@@ -323,7 +357,7 @@ export async function apiFetchProjects(): Promise<{ success: boolean; data: Proj
           if (typeof p === 'string') {
             return { id: p, name: p };
           }
-          const id = p.project_id ?? p.id ?? p.projectId ?? (p.project_name ? String(p.project_name) : 'proj');
+          const id = p.project_id ?? p.id ?? p.projectId ?? (p.project_name ? String(p.project_name) : '');
           const name = typeof p.project_name === 'string'
             ? p.project_name
             : typeof p.name === 'string'
@@ -339,28 +373,26 @@ export async function apiFetchProjects(): Promise<{ success: boolean; data: Proj
                 : undefined
           };
         });
-        if (list.length > 0) {
-          cachedProjects = list;
-          return { success: true, data: list };
-        }
+        cachedProjects = list;
+        return { success: true, data: list };
       }
+
+      return {
+        success: false,
+        data: [],
+        message: response
+          ? `Projects API returned status ${response.status}`
+          : 'Failed to connect to projects API.'
+      };
     } catch (err: any) {
-      console.warn('Could not fetch projects from API:', err.message);
+      return {
+        success: false,
+        data: [],
+        message: err?.message || 'Error fetching projects from API.'
+      };
     } finally {
       cachedProjectsPromise = null;
     }
-
-    const fallback: ProjectItem[] = [
-      { id: '1', name: 'Nokia Production Dashboard' },
-      { id: '2', name: 'Manufacturing Analytics' },
-      { id: '3', name: 'Inventory Monitoring' },
-      { id: '4', name: 'Network Monitoring' }
-    ];
-    cachedProjects = fallback;
-    return {
-      success: false,
-      data: fallback
-    };
   })();
 
   return cachedProjectsPromise;
@@ -425,17 +457,27 @@ export async function apiFetchDevelopers(
           roleType: d.role_type || d.roleType || '',
           email: d.email || d.emial || ''
         }));
-        if (list.length > 0) {
-          if (roleTarget === 'supporter') {
-            cachedSupporters = list;
-          } else {
-            cachedDevelopers = list;
-          }
-          return { success: true, data: list };
+        if (roleTarget === 'supporter') {
+          cachedSupporters = list;
+        } else {
+          cachedDevelopers = list;
         }
+        return { success: true, data: list };
       }
+
+      return {
+        success: false,
+        data: [],
+        message: response
+          ? `Failed to fetch ${roleTarget}s (${response.status})`
+          : `Failed to connect to ${roleTarget}s API.`
+      };
     } catch (err: any) {
-      console.warn(`Could not fetch ${roleTarget} from API:`, err.message);
+      return {
+        success: false,
+        data: [],
+        message: err?.message || `Error fetching ${roleTarget}s from API.`
+      };
     } finally {
       if (roleTarget === 'supporter') {
         cachedSupportersPromise = null;
@@ -443,11 +485,6 @@ export async function apiFetchDevelopers(
         cachedDevelopersPromise = null;
       }
     }
-
-    return {
-      success: false,
-      data: []
-    };
   })();
 
   if (roleTarget === 'supporter') {
@@ -795,36 +832,53 @@ export async function apiUpdateIssue(
 ): Promise<{ success: boolean; data?: Issue; message?: string }> {
   try {
     const payload: Record<string, any> = {};
-    if (updatedFields.title) {
+    if (updatedFields.title !== undefined) {
       payload.issue_title = updatedFields.title;
       payload.title = updatedFields.title;
     }
-    if (updatedFields.description) {
+    if (updatedFields.description !== undefined) {
       payload.issue_description = updatedFields.description;
       payload.description = updatedFields.description;
     }
-    if (updatedFields.projectId) {
+    if (updatedFields.projectId !== undefined) {
       payload.project_id = updatedFields.projectId;
       payload.projectId = updatedFields.projectId;
     }
-    if (updatedFields.issueType) {
+    if (updatedFields.issueType !== undefined) {
       payload.issue_type = updatedFields.issueType;
       payload.issueType = updatedFields.issueType;
     }
-    if (updatedFields.occurrenceTime) {
+    if (updatedFields.occurrenceTime !== undefined) {
       payload.issue_time = updatedFields.occurrenceTime;
       payload.occurrenceTime = updatedFields.occurrenceTime;
     }
-    if (updatedFields.status) {
+    if (updatedFields.shift !== undefined) {
+      payload.issue_shift = updatedFields.shift;
+      payload.shift = updatedFields.shift;
+    }
+    if (updatedFields.status !== undefined) {
       payload.issue_status = updatedFields.status;
       payload.status = updatedFields.status;
     }
-    if (updatedFields.priority) {
+    if (updatedFields.priority !== undefined) {
       payload.issue_priority = updatedFields.priority;
       payload.priority = updatedFields.priority;
     }
-    if (updatedFields.rca) {
-      payload.rca = updatedFields.rca;
+    if (updatedFields.rca !== undefined) {
+      payload.rca = updatedFields.rca && updatedFields.rca.trim() ? updatedFields.rca.trim() : null;
+    }
+    if (updatedFields.assignedToId !== undefined || updatedFields.acceptedDeveloperId !== undefined || updatedFields.assignedTo !== undefined || updatedFields.acceptedDeveloper !== undefined) {
+      const targetId = updatedFields.assignedToId ?? updatedFields.acceptedDeveloperId;
+      const targetName = updatedFields.assignedTo ?? updatedFields.acceptedDeveloper;
+      payload.assigned_to =
+        targetId && String(targetId).trim()
+          ? targetId
+          : targetName && targetName !== 'Unassigned'
+            ? targetName
+            : null;
+      if (targetId !== undefined) {
+        payload.assigned_to_id = targetId || null;
+      }
     }
 
     const primaryUrl = source === 'previous-issues'
@@ -840,7 +894,7 @@ export async function apiUpdateIssue(
       body: JSON.stringify(payload)
     }).catch(() => null);
 
-    if (!response || response.status === 404) {
+    if (!response || response.status === 404 || response.status === 405) {
       response = await fetch(fallbackUrl, {
         method: 'PATCH',
         headers: getAuthHeaders(),
@@ -848,7 +902,7 @@ export async function apiUpdateIssue(
       }).catch(() => null);
     }
 
-    if (!response || response.status === 404) {
+    if (!response || response.status === 404 || response.status === 405) {
       response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
@@ -856,16 +910,29 @@ export async function apiUpdateIssue(
       }).catch(() => null);
     }
 
-    if (response && response.ok) {
-      const json = await response.json().catch(() => null);
-      if (json) {
-        return { success: true, data: normalizeIssue(json.data || json) };
-      }
+    if (!response) {
+      return { success: false, message: 'Failed to reach backend server to update issue.' };
+    }
+
+    const json = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const detail = json?.detail || json?.message || json?.error;
+      const errorMsg = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(', ')
+          : `Failed to update issue (${response.status})`;
+      return { success: false, message: errorMsg };
+    }
+
+    if (json) {
+      return { success: true, data: normalizeIssue(json.data || json.issue || json) };
     }
 
     return { success: true };
   } catch (err: any) {
-    return { success: false, message: err.message };
+    return { success: false, message: err?.message || 'Error updating issue.' };
   }
 }
 
@@ -994,75 +1061,103 @@ export async function apiDeleteIssue(
 }
 
 /**
+ * Parses backend timestamps reliably, handling naive UTC strings (e.g. FastAPI without 'Z').
+ */
+export function parseBackendTimestamp(dateVal: unknown): Date | null {
+  if (!dateVal || typeof dateVal !== 'string') return null;
+  const trimmed = dateVal.trim();
+  if (!trimmed) return null;
+
+  // Already includes timezone designator ('Z' or +/-HH:MM)
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  // Naive ISO datetime (e.g. "2026-11-18T05:38:55.842686" from Python datetime.utcnow())
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(trimmed)) {
+    const normalizedIso = trimmed.replace(' ', 'T');
+    const utcCandidate = new Date(`${normalizedIso}Z`);
+    const localCandidate = new Date(normalizedIso);
+
+    if (!isNaN(utcCandidate.getTime()) && utcCandidate.getTime() <= Date.now() + 60_000) {
+      return utcCandidate;
+    }
+    return isNaN(localCandidate.getTime()) ? null : localCandidate;
+  }
+
+  const parsed = new Date(trimmed);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
  * Normalizes discussion message matching backend schema:
  * { id, issue_id, sender_id, sender_name, markdown, created_at }
  */
 export function normalizeDiscussionMessage(m: any, defaultIssueId: string): DiscussionMessage {
   const text = m.markdown || m.message || m.text || '';
-  const senderName = m.sender_name || m.senderName || 'User';
+  const senderName = m.sender_name || m.senderName || 'Unknown User';
 
-  // Determine role: Developer or Supporter
-  let role: 'Support' | 'Supporter' | 'Developer' = 'Supporter';
-  const rawRole = String(m.sender_role || m.role || m.senderRole || '').toLowerCase();
-  const lowerName = String(senderName).toLowerCase();
-  if (
-    rawRole.includes('dev') ||
-    lowerName.includes('jeva') ||
-    lowerName.includes('arun') ||
-    lowerName.includes('developer')
-  ) {
-    role = 'Developer';
-  } else if (
-    rawRole.includes('supp') ||
-    lowerName.includes('sivabalan') ||
-    lowerName.includes('supporter')
-  ) {
-    role = 'Supporter';
-  }
-
-  // Format timestamp: "Nov 17, 2026 • 04:20 PM" matching reference UI
-  let timestamp = '';
-  const dateVal = m.created_at || m.createdAt || m.timestamp;
-  if (dateVal) {
-    try {
-      const d = new Date(dateVal);
-      if (!isNaN(d.getTime())) {
-        const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-        timestamp = `${datePart} • ${timePart}`;
-      } else {
-        timestamp = String(dateVal);
-      }
-    } catch {
-      timestamp = String(dateVal);
+  // Determine role strictly from API response payload (never hardcode usernames)
+  let role = '';
+  const rawRole = String(m.sender_role || m.role || m.senderRole || '').trim();
+  if (rawRole) {
+    const lowerRole = rawRole.toLowerCase();
+    if (lowerRole.includes('dev')) {
+      role = 'Developer';
+    } else if (lowerRole.includes('supp')) {
+      role = 'Supporter';
+    } else {
+      role = rawRole;
     }
   }
-  if (!timestamp) {
-    const d = new Date();
-    timestamp = `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} • ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
+
+  const rawCreatedAt = m.created_at || m.createdAt || '';
+  const rawUpdatedAt = m.updated_at || m.updatedAt || m.edited_at || m.editedAt || '';
+  const parsedCreated = parseBackendTimestamp(rawCreatedAt || m.timestamp);
+  const parsedUpdated = parseBackendTimestamp(rawUpdatedAt);
+
+  // Format display time only (e.g. "04:20 PM") — date is shown in Today/Yesterday WhatsApp dividers
+  let timestamp = '';
+  if (parsedCreated) {
+    timestamp = parsedCreated.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } else if (m.timestamp) {
+    timestamp = String(m.timestamp);
   }
 
+  const createdAt = parsedCreated ? parsedCreated.toISOString() : String(rawCreatedAt || '');
+  const updatedAt = parsedUpdated ? parsedUpdated.toISOString() : String(rawUpdatedAt || '');
+  const isEdited = Boolean(
+    m.is_edited ?? m.isEdited ?? (updatedAt && createdAt && updatedAt !== createdAt)
+  );
+
   return {
-    id: String(m.id || `msg-${Date.now()}`),
-    issueId: String(m.issue_id || defaultIssueId),
-    senderId: String(m.sender_id || m.senderId || ''),
+    id: String(m.id ?? `msg-${Date.now()}`),
+    issueId: String(m.issue_id || m.issueId || defaultIssueId),
+    senderId: m.sender_id != null ? String(m.sender_id) : (m.senderId != null ? String(m.senderId) : ''),
     senderName,
     senderRole: role,
     message: text,
     markdown: text,
-    createdAt: m.created_at || '',
+    createdAt,
+    updatedAt: updatedAt || undefined,
+    isEdited,
     timestamp,
     attachment: m.attachment,
-    reaction: m.reaction,
-    isEdited: Boolean(m.is_edited || m.isEdited || m.edited_at || m.editedAt),
-    editedAt: m.edited_at || m.editedAt || undefined
+    reaction: m.reaction
   };
 }
 
 /**
- * Fetch discussion messages for an issue
+ * Fetch discussion messages for an issue with status & error reporting
  */
-export async function apiFetchMessages(issueId: string): Promise<DiscussionMessage[]> {
+export async function apiFetchMessagesWithStatus(
+  issueId: string
+): Promise<{ success: boolean; data: DiscussionMessage[]; message?: string }> {
   try {
     const endpoints = [
       `${API_BASE_URL}/my-issues/${issueId}/messages`,
@@ -1078,18 +1173,48 @@ export async function apiFetchMessages(issueId: string): Promise<DiscussionMessa
       }).catch(() => null);
 
       if (response && response.ok) break;
+      if (response && response.status !== 404) break;
     }
 
-    if (!response || !response.ok) return [];
+    if (!response) {
+      return {
+        success: false,
+        data: [],
+        message: 'Failed to reach server while loading messages.'
+      };
+    }
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      return {
+        success: false,
+        data: [],
+        message: errJson?.detail || errJson?.message || `Failed to load messages (${response.status})`
+      };
+    }
 
     const json = await response.json();
     const list = Array.isArray(json) ? json : json.data || json.messages || [];
 
-    return list.map((m: any) => normalizeDiscussionMessage(m, issueId));
-  } catch (error) {
-    console.error('[apiFetchMessages] Error fetching messages:', error);
-    return [];
+    return {
+      success: true,
+      data: list.map((m: any) => normalizeDiscussionMessage(m, issueId))
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      data: [],
+      message: error?.message || 'Error fetching messages from server.'
+    };
   }
+}
+
+/**
+ * Fetch discussion messages for an issue
+ */
+export async function apiFetchMessages(issueId: string): Promise<DiscussionMessage[]> {
+  const res = await apiFetchMessagesWithStatus(issueId);
+  return res.data;
 }
 
 /**
@@ -1100,7 +1225,7 @@ export async function apiSendMessage(
   message: string,
   senderId?: string,
   senderName?: string
-): Promise<{ success: boolean; message?: DiscussionMessage }> {
+): Promise<{ success: boolean; message?: DiscussionMessage; error?: string }> {
   try {
     // Resolve integer sender_id if available from user session
     let numericSenderId: number | undefined;
@@ -1128,7 +1253,6 @@ export async function apiSendMessage(
     ];
 
     // Payload variants to prevent 422 Unprocessable Content
-    // Variant 1: Complete payload with markdown, issue_id, sender_id, sender_name
     const fullPayload: Record<string, any> = {
       markdown: message,
       issue_id: issueId
@@ -1136,12 +1260,10 @@ export async function apiSendMessage(
     if (numericSenderId) fullPayload.sender_id = numericSenderId;
     if (senderName) fullPayload.sender_name = senderName;
 
-    // Variant 2: Minimal markdown only
     const minimalPayload = {
       markdown: message
     };
 
-    // Variant 3: Both markdown and message
     const dualPayload: Record<string, any> = {
       markdown: message,
       message
@@ -1152,18 +1274,13 @@ export async function apiSendMessage(
     let data: any = null;
 
     for (const url of endpoints) {
-      // 1. Try full payload
       response = await fetch(url, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(fullPayload)
       }).catch(() => null);
 
-      // If 422, retry with minimal payload
       if (response && response.status === 422) {
-        const err422 = await response.text().catch(() => '');
-        console.warn(`[apiSendMessage] 422 on ${url} with full payload: ${err422}. Retrying with minimal payload...`);
-        
         response = await fetch(url, {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -1171,7 +1288,6 @@ export async function apiSendMessage(
         }).catch(() => null);
       }
 
-      // If still 422, try dual payload
       if (response && response.status === 422) {
         response = await fetch(url, {
           method: 'POST',
@@ -1184,11 +1300,23 @@ export async function apiSendMessage(
         data = await response.json().catch(() => null);
         break;
       }
+
+      if (response && response.status !== 404) {
+        break;
+      }
     }
 
-    if (!response || !response.ok) {
-      console.error('[apiSendMessage] Message post failed with status:', response?.status);
-      return { success: false };
+    if (!response) {
+      return { success: false, error: 'Failed to reach server when sending message.' };
+    }
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      const errMsg = errJson?.detail || errJson?.message || `Failed to send message (${response.status})`;
+      return {
+        success: false,
+        error: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)
+      };
     }
 
     // Process server response which could be array [ { id, issue_id, sender_id, sender_name, markdown, created_at } ] or single item
@@ -1197,8 +1325,8 @@ export async function apiSendMessage(
     const normalized = normalizeDiscussionMessage(item || {
       id: `msg-${Date.now()}`,
       issue_id: issueId,
-      sender_id: numericSenderId,
-      sender_name: senderName || 'User',
+      sender_id: numericSenderId ?? senderId,
+      sender_name: senderName || '',
       markdown: message,
       created_at: new Date().toISOString()
     }, issueId);
@@ -1207,50 +1335,55 @@ export async function apiSendMessage(
       success: true,
       message: normalized
     };
-  } catch (err) {
-    console.error('[apiSendMessage] Error:', err);
-    return { success: false };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Network error while sending message.'
+    };
   }
 }
 
 /**
- * Update an existing discussion message within the 15-minute edit window
+ * Update an existing discussion message (backend enforces ownership & 15-minute edit window)
  */
 export async function apiUpdateMessage(
   issueId: string,
   messageId: string,
-  updatedText: string
-): Promise<{ success: boolean; message?: DiscussionMessage; error?: string }> {
+  markdown: string
+): Promise<{ success: boolean; message?: DiscussionMessage; error?: string; status?: number }> {
   try {
     const endpoints = [
-      `${API_BASE_URL}/my-issues/${issueId}/messages/${messageId}`,
       `${API_BASE_URL}/issues/${issueId}/messages/${messageId}`,
-      `${API_BASE_URL}/previous-issues/${issueId}/messages/${messageId}`,
-      `${API_BASE_URL}/messages/${messageId}`
+      `${API_BASE_URL}/my-issues/${issueId}/messages/${messageId}`,
+      `${API_BASE_URL}/previous-issues/${issueId}/messages/${messageId}`
     ];
 
-    const payload = {
-      markdown: updatedText,
-      message: updatedText
-    };
+    const primaryPayload = { markdown };
+    const dualPayload = { markdown, message: markdown };
 
     let response: Response | null = null;
     let data: any = null;
 
     for (const url of endpoints) {
-      // 1. Try PATCH
       response = await fetch(url, {
         method: 'PATCH',
         headers: getAuthHeaders(),
-        body: JSON.stringify(payload)
+        body: JSON.stringify(primaryPayload)
       }).catch(() => null);
 
-      // 2. If 404 or 405 Method Not Allowed, try PUT
-      if (!response || response.status === 404 || response.status === 405) {
+      if (response && response.status === 405) {
         response = await fetch(url, {
           method: 'PUT',
           headers: getAuthHeaders(),
-          body: JSON.stringify(payload)
+          body: JSON.stringify(primaryPayload)
+        }).catch(() => null);
+      }
+
+      if (response && response.status === 422) {
+        response = await fetch(url, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(dualPayload)
         }).catch(() => null);
       }
 
@@ -1258,19 +1391,49 @@ export async function apiUpdateMessage(
         data = await response.json().catch(() => null);
         break;
       }
+
+      if (response && response.status !== 404 && response.status !== 405) {
+        break;
+      }
     }
 
-    const item = Array.isArray(data) ? data[0] : (data?.data || data);
-    const normalized = item
-      ? normalizeDiscussionMessage(item, issueId)
-      : undefined;
+    if (!response) {
+      return { success: false, status: 0, error: 'Failed to reach server when updating message.' };
+    }
 
-    return {
-      success: true,
-      message: normalized
-    };
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      const errMsg =
+        errJson?.detail ||
+        errJson?.message ||
+        errJson?.error ||
+        (response.status === 404 || response.status === 405
+          ? 'Message update API endpoint is not available on the backend server.'
+          : `Failed to update message (${response.status})`);
+      return {
+        success: false,
+        status: response.status,
+        error: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)
+      };
+    }
+
+    const item = Array.isArray(data) ? data[data.length - 1] : (data?.data || data?.message || data);
+    if (item && typeof item === 'object' && (item.markdown || item.message || item.text || item.id)) {
+      const normalized = normalizeDiscussionMessage(item, issueId);
+      return {
+        success: true,
+        message: {
+          ...normalized,
+          isEdited: true
+        }
+      };
+    }
+
+    return { success: true };
   } catch (err: any) {
-    console.error('[apiUpdateMessage] Error updating message:', err);
-    return { success: false, error: err?.message };
+    return {
+      success: false,
+      error: err?.message || 'Network error while updating message.'
+    };
   }
 }

@@ -1,4 +1,5 @@
 import React from 'react';
+import { SSEConnectionState } from '../../hooks/useDashboardSSE';
 
 export interface WelcomeBannerProps {
   userName?: string;
@@ -6,6 +7,8 @@ export interface WelcomeBannerProps {
   roleType?: string;
   isDeveloper?: boolean;
   isConnected?: boolean;
+  connectionState?: SSEConnectionState;
+  sseError?: string | null;
   subtitle: string;
   onRefresh: () => void;
   onCreateIssue: () => void;
@@ -13,16 +16,53 @@ export interface WelcomeBannerProps {
 }
 
 export const WelcomeBanner: React.FC<WelcomeBannerProps> = ({
-  userName = 'User',
+  userName,
   employeeId,
   roleType,
   isDeveloper = false,
   isConnected = false,
+  connectionState,
+  sseError,
   subtitle,
   onRefresh,
   onCreateIssue,
   isRefreshing = false
 }) => {
+  const effectiveState: SSEConnectionState =
+    connectionState || (isConnected ? 'connected' : 'reconnecting');
+
+  const statusBadgeMap: Record<
+    SSEConnectionState,
+    { badgeClass: string; icon: string; label: string; title: string }
+  > = {
+    connected: {
+      badgeClass: 'bg-success-subtle text-success',
+      icon: 'bi-broadcast',
+      label: 'Real-Time Live',
+      title: 'Live dashboard Server-Sent Events (SSE) connected'
+    },
+    reconnecting: {
+      badgeClass: 'bg-warning-subtle text-warning-emphasis',
+      icon: 'bi-arrow-repeat',
+      label: 'Reconnecting...',
+      title: 'Reconnecting to live dashboard SSE stream...'
+    },
+    error: {
+      badgeClass: 'bg-danger-subtle text-danger',
+      icon: 'bi-exclamation-circle',
+      label: 'Stream Error',
+      title: sseError || 'Live dashboard SSE connection interrupted'
+    },
+    disconnected: {
+      badgeClass: 'bg-secondary-subtle text-secondary',
+      icon: 'bi-pause-circle',
+      label: 'Disconnected',
+      title: 'Live dashboard SSE stream disconnected'
+    }
+  };
+
+  const statusUi = statusBadgeMap[effectiveState];
+
   return (
     <div className="welcome-card-reference flex-shrink-0">
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
@@ -34,7 +74,7 @@ export const WelcomeBanner: React.FC<WelcomeBannerProps> = ({
           <div>
             <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
               <h4 className="fw-bold text-navy mb-0" style={{ fontSize: '1.5rem', letterSpacing: '-0.4px' }}>
-                Welcome, {userName}!
+                {userName ? `Welcome, ${userName}!` : 'Welcome!'}
               </h4>
               {employeeId && (
                 <span
@@ -53,14 +93,12 @@ export const WelcomeBanner: React.FC<WelcomeBannerProps> = ({
                 </span>
               )}
               <span
-                className={`badge ${
-                  isConnected ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary'
-                } rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5`}
+                className={`badge ${statusUi.badgeClass} rounded-pill px-3 py-1 fw-semibold d-inline-flex align-items-center gap-1.5`}
                 style={{ fontSize: '0.78rem' }}
-                title={isConnected ? 'Real-time WebSocket connected' : 'Connecting to real-time updates...'}
+                title={statusUi.title}
               >
-                <i className={`bi ${isConnected ? 'bi-broadcast' : 'bi-arrow-repeat'}`}></i>
-                {isConnected ? 'Real-Time Live' : 'Connecting...'}
+                <i className={`bi ${statusUi.icon}`}></i>
+                {statusUi.label}
               </span>
             </div>
             <p className="text-secondary mb-0" style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>

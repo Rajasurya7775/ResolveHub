@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { DiscussionMessage } from '../types/issue';
-import { apiFetchMessages, normalizeDiscussionMessage } from '../services/api/issueService';
+import { normalizeDiscussionMessage } from '../services/api/issueService';
+import { API_BASE_URL, getAuthToken } from '../services/api/apiClient';
 
 const INITIAL_RECONNECT_DELAY_MS = 1500;
 const MAX_RECONNECT_DELAY_MS = 30000;
 const BACKOFF_FACTOR = 1.5;
 const HEARTBEAT_INTERVAL_MS = 25000;
-const BACKGROUND_POLL_INTERVAL_MS = 4000; // Background sync when WS is unavailable
 
 interface UseIssueMessagesWebSocketOptions {
   issueId?: string;
   onNewMessage?: (msg: DiscussionMessage) => void;
+  onMessageUpdated?: (msg: DiscussionMessage) => void;
   onMessagesUpdated?: (messages: DiscussionMessage[]) => void;
   enabled?: boolean;
 }
 
 /**
- * Extracts host from API URL or environment string
+ * Extracts host and security flag from an HTTP/WS URL
  */
 function extractHostAndProtocol(rawUrl?: string): { host: string; isSecure: boolean } {
   if (!rawUrl || typeof rawUrl !== 'string') {
@@ -39,46 +40,49 @@ function extractHostAndProtocol(rawUrl?: string): { host: string; isSecure: bool
 }
 
 /**
- * Resolves candidate WebSocket endpoints for message discussions
+ * Resolves the single WebSocket endpoint for issue message discussions.
  */
-export function getMessageWebSocketUrls(issueId?: string): string[] {
-  if (!issueId) return [];
+export function getMessageWebSocketUrl(issueId?: string): string | null {
+  if (!issueId) return null;
 
-  const envWsUrl =
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL) || '';
+  const envMessagesWsUrl =
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MESSAGES_WS_URL) || '';
 
-  const { host, isSecure } = extractHostAndProtocol(
-    envWsUrl || (import.meta.env && import.meta.env.VITE_API_BASE_URL) || 'http://localhost:8000/api/v1'
-  );
+  if (envMessagesWsUrl.trim()) {
+    const cleanTemplate = envMessagesWsUrl.trim().replace(/^['"]+|['"]+$/g, '').trim().replace(/\/+$/, '');
+    const replaced = cleanTemplate.replace(/\{issue_?id\}|<issue_?id>/gi, encodeURIComponent(issueId));
+    if (replaced !== cleanTemplate) {
+      return replaced;
+    }
+    return `${cleanTemplate}/${encodeURIComponent(issueId)}/messages`;
+  }
 
+  const { host, isSecure } = extractHostAndProtocol(API_BASE_URL);
   const protocol = isSecure ? 'wss:' : 'ws:';
 
-  return [
-    `${protocol}//${host}/api/v1/ws/issues/${issueId}/messages`,
-  ];
+  return `${protocol}//${host}/api/v1/ws/my-issues/${encodeURIComponent(issueId)}/messages`;
 }
 
 /**
  * Custom React Hook: useIssueMessagesWebSocket
  *
- * Provides real-time message synchronization with a resilient multi-tier architecture:
- * 1. Real WebSocket: Connects to backend FastAPI WebSocket endpoints if available.
- * 2. Cross-Tab/Window Live Sync: BroadcastChannel + localStorage events synchronize messages
- *    instantly between open tabs (e.g. Supporter and Developer windows) with 0ms latency.
- * 3. Smart Background Polling: Periodically checks for new messages when backend WS is absent,
- *    ensuring 100% functionality even without any backend WebSocket infrastructure.
+ * Uses WebSocket-only real-time messaging (no HTTP polling hits) plus zero-network
+ * BroadcastChannel sync across browser tabs of the same origin.
  */
 export function useIssueMessagesWebSocket(options: UseIssueMessagesWebSocketOptions) {
-  const { issueId, onNewMessage, onMessagesUpdated, enabled = true } = options;
+  const { issueId, onNewMessage, onMessageUpdated, onMessagesUpdated, enabled = true } = options;
 
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [syncMode, setSyncMode] = useState<'websocket' | 'broadcast-sync'>('broadcast-sync');
 
-  // Callback refs to prevent reconnection loops
   const onNewMessageRef = useRef(onNewMessage);
   useEffect(() => {
     onNewMessageRef.current = onNewMessage;
   }, [onNewMessage]);
+
+  const onMessageUpdatedRef = useRef(onMessageUpdated);
+  useEffect(() => {
+    onMessageUpdatedRef.current = onMessageUpdated;
+  }, [onMessageUpdated]);
 
   const onMessagesUpdatedRef = useRef(onMessagesUpdated);
   useEffect(() => {
@@ -86,15 +90,19 @@ export function useIssueMessagesWebSocket(options: UseIssueMessagesWebSocketOpti
   }, [onMessagesUpdated]);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<any>(null);
-  const heartbeatTimerRef = useRef<any>(null);
-  const pollTimerRef = useRef<any>(null);
+  const isUnmountedRef = useRef<boolean>(false);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectDelayRef = useRef<number>(INITIAL_RECONNECT_DELAY_MS);
-  const candidateIndexRef = useRef<number>(0);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
 
-  // 1. Cross-Tab Broadcast Channel initialization
+  // Reset known IDs when switching issues
+  useEffect(() => {
+    knownMessageIdsRef.current.clear();
+  }, [issueId]);
+
+  // 1. Cross-Tab BroadcastChannel (zero network hits)
   useEffect(() => {
     if (!issueId || !enabled) return;
 
@@ -107,32 +115,41 @@ export function useIssueMessagesWebSocket(options: UseIssueMessagesWebSocketOpti
         broadcastChannelRef.current = channel;
 
         channel.onmessage = (event) => {
-          if (!event.data) return;
+          if (!event.data || isUnmountedRef.current) return;
           const { type, message } = event.data;
           if (type === 'NEW_MESSAGE' && message) {
             if (!knownMessageIdsRef.current.has(message.id)) {
               knownMessageIdsRef.current.add(message.id);
               onNewMessageRef.current?.(message);
             }
+          } else if (type === 'MESSAGE_UPDATED' && message) {
+            knownMessageIdsRef.current.add(message.id);
+            onMessageUpdatedRef.current?.(message);
           } else if (type === 'MESSAGES_UPDATED' && Array.isArray(message)) {
             onMessagesUpdatedRef.current?.(message);
           }
         };
       } catch {
-        // BroadcastChannel fallback handled below
+        // ignore if BroadcastChannel is unsupported
       }
     }
 
-    // Storage event fallback for cross-tab sync
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === `resolvehub_ws_msg_${issueId}` && e.newValue) {
+      if (e.key === `resolvehub_ws_msg_${issueId}` && e.newValue && !isUnmountedRef.current) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && parsed.message && !knownMessageIdsRef.current.has(parsed.message.id)) {
-            knownMessageIdsRef.current.add(parsed.message.id);
-            onNewMessageRef.current?.(parsed.message);
+          if (parsed && parsed.message) {
+            if (parsed.type === 'MESSAGE_UPDATED') {
+              knownMessageIdsRef.current.add(parsed.message.id);
+              onMessageUpdatedRef.current?.(parsed.message);
+            } else if (!knownMessageIdsRef.current.has(parsed.message.id)) {
+              knownMessageIdsRef.current.add(parsed.message.id);
+              onNewMessageRef.current?.(parsed.message);
+            }
           }
-        } catch { }
+        } catch {
+          // ignore malformed storage payload
+        }
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -146,79 +163,139 @@ export function useIssueMessagesWebSocket(options: UseIssueMessagesWebSocketOpti
     };
   }, [issueId, enabled]);
 
-  // 2. Real WebSocket Connection Manager
+  // 2. WebSocket Connection Manager (no HTTP polling)
   const connectWebSocket = useCallback(() => {
-    if (!issueId || !enabled) return;
+    if (!issueId || !enabled || isUnmountedRef.current) return;
 
-    const candidateUrls = getMessageWebSocketUrls(issueId);
-    if (candidateUrls.length === 0) return;
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
 
-    const targetUrl = candidateUrls[candidateIndexRef.current % candidateUrls.length];
+    const baseUrl = getMessageWebSocketUrl(issueId);
+    if (!baseUrl) return;
+
+    const token = getAuthToken();
+    const targetUrl = token
+      ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+      : baseUrl;
 
     try {
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.onerror = null;
-        wsRef.current.close();
-      }
-
       const ws = new WebSocket(targetUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (isUnmountedRef.current) {
+          try {
+            ws.close(1000, 'Component unmounted');
+          } catch {
+            // ignore
+          }
+          return;
+        }
         setIsConnected(true);
-        setSyncMode('websocket');
         reconnectDelayRef.current = INITIAL_RECONNECT_DELAY_MS;
 
-        // Heartbeat ping
-        clearInterval(heartbeatTimerRef.current);
+        if (heartbeatTimerRef.current) {
+          clearInterval(heartbeatTimerRef.current);
+        }
         heartbeatTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(JSON.stringify({ type: 'ping' }));
-            } catch { }
+            } catch {
+              // ignore send error
+            }
           }
         }, HEARTBEAT_INTERVAL_MS);
       };
 
       ws.onmessage = (event) => {
+        if (isUnmountedRef.current) return;
         try {
-          const payload = JSON.parse(event.data);
-          if (payload.type === 'pong' || payload.event === 'pong') return;
+          const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+          if (!payload || payload.type === 'pong' || payload.event === 'pong') return;
 
-          // If incoming message or array
-          if (Array.isArray(payload)) {
-            const list = payload.map((m) => normalizeDiscussionMessage(m, issueId));
-            list.forEach((m) => knownMessageIdsRef.current.add(m.id));
+          const maybeList = Array.isArray(payload)
+            ? payload
+            : Array.isArray(payload.data)
+              ? payload.data
+              : Array.isArray(payload.messages)
+                ? payload.messages
+                : null;
+
+          if (maybeList) {
+            const list = maybeList.map((m: unknown) => normalizeDiscussionMessage(m, issueId));
+            list.forEach((m: DiscussionMessage) => knownMessageIdsRef.current.add(m.id));
             onMessagesUpdatedRef.current?.(list);
-          } else {
-            const item = payload.data || payload.message || payload;
-            if (item.markdown || item.message || item.text) {
-              const normalized = normalizeDiscussionMessage(item, issueId);
-              if (!knownMessageIdsRef.current.has(normalized.id)) {
-                knownMessageIdsRef.current.add(normalized.id);
-                onNewMessageRef.current?.(normalized);
-              }
+            return;
+          }
+
+          const eventName = String(payload.type || payload.event || '').toLowerCase();
+          if (
+            eventName === 'connected' ||
+            eventName === 'ping' ||
+            eventName === 'pong' ||
+            eventName === 'subscribed' ||
+            eventName === 'ack'
+          ) {
+            return;
+          }
+
+          const item =
+            payload.data && typeof payload.data === 'object'
+              ? payload.data
+              : payload.message && typeof payload.message === 'object'
+                ? payload.message
+                : payload;
+
+          const hasChatPayload =
+            Boolean(item) &&
+            (typeof item.markdown === 'string' ||
+              ((typeof item.message === 'string' || typeof item.text === 'string') &&
+                (item.id != null || item.sender_id != null || item.senderId != null || item.sender_name != null || item.senderName != null)));
+
+          if (hasChatPayload) {
+            const normalized = normalizeDiscussionMessage(item, issueId);
+            const isUpdateEvent =
+              eventName.includes('update') ||
+              eventName.includes('edit') ||
+              Boolean(normalized.isEdited);
+
+            if (isUpdateEvent && knownMessageIdsRef.current.has(normalized.id)) {
+              onMessageUpdatedRef.current?.(normalized);
+            } else {
+              knownMessageIdsRef.current.add(normalized.id);
+              onNewMessageRef.current?.(normalized);
             }
           }
-        } catch { }
+        } catch {
+          // ignore non-JSON frames safely
+        }
       };
 
       ws.onerror = () => {
-        // Will trigger onclose and attempt fallback/reconnect
+        // Handled by onclose backoff reconnect
       };
 
       ws.onclose = () => {
         setIsConnected(false);
-        setSyncMode('broadcast-sync');
-        clearInterval(heartbeatTimerRef.current);
+        wsRef.current = null;
 
-        // Advance to next candidate URL
-        candidateIndexRef.current += 1;
+        if (heartbeatTimerRef.current) {
+          clearInterval(heartbeatTimerRef.current);
+          heartbeatTimerRef.current = null;
+        }
 
-        // Auto-reconnect with exponential backoff
-        clearTimeout(reconnectTimeoutRef.current);
+        if (isUnmountedRef.current || !enabled) return;
+
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
         reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = null;
           reconnectDelayRef.current = Math.min(
             reconnectDelayRef.current * BACKOFF_FACTOR,
             MAX_RECONNECT_DELAY_MS
@@ -228,97 +305,96 @@ export function useIssueMessagesWebSocket(options: UseIssueMessagesWebSocketOpti
       };
     } catch {
       setIsConnected(false);
-      setSyncMode('broadcast-sync');
     }
   }, [issueId, enabled]);
 
   useEffect(() => {
+    isUnmountedRef.current = false;
     connectWebSocket();
 
     return () => {
-      clearTimeout(reconnectTimeoutRef.current);
-      clearInterval(heartbeatTimerRef.current);
+      isUnmountedRef.current = true;
+      setIsConnected(false);
+
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (heartbeatTimerRef.current) {
+        clearInterval(heartbeatTimerRef.current);
+        heartbeatTimerRef.current = null;
+      }
       if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.onerror = null;
-        wsRef.current.close();
+        const activeWs = wsRef.current;
         wsRef.current = null;
+        activeWs.onmessage = null;
+        activeWs.onerror = null;
+        activeWs.onclose = null;
+        if (activeWs.readyState === WebSocket.OPEN) {
+          activeWs.onopen = null;
+          try {
+            activeWs.close(1000, 'Component unmounted');
+          } catch {
+            // ignore
+          }
+        } else if (activeWs.readyState === WebSocket.CONNECTING) {
+          activeWs.onopen = () => {
+            try {
+              activeWs.close(1000, 'Component unmounted');
+            } catch {
+              // ignore
+            }
+          };
+        }
       }
     };
   }, [connectWebSocket]);
 
-  // 3. Smart Background Polling (active when WebSocket is not connected or as backup)
-  useEffect(() => {
-    if (!issueId || !enabled) return;
-
-    const poll = async () => {
-      try {
-        const msgs = await apiFetchMessages(issueId);
-        if (msgs && msgs.length > 0) {
-          let hasNew = false;
-          msgs.forEach((m) => {
-            if (!knownMessageIdsRef.current.has(m.id)) {
-              knownMessageIdsRef.current.add(m.id);
-              hasNew = true;
-            }
-          });
-          if (hasNew) {
-            onMessagesUpdatedRef.current?.(msgs);
-          }
-        }
-      } catch { }
-    };
-
-    pollTimerRef.current = setInterval(poll, BACKGROUND_POLL_INTERVAL_MS);
-
-    return () => {
-      clearInterval(pollTimerRef.current);
-    };
-  }, [issueId, enabled]);
-
-  // 4. Broadcast helper function to immediately send to other tabs and active WS
+  // 3. Broadcast helper (WebSocket + same-origin tabs)
   const broadcastMessage = useCallback(
-    (msg: DiscussionMessage) => {
+    (msg: DiscussionMessage, eventType: 'NEW_MESSAGE' | 'MESSAGE_UPDATED' = 'NEW_MESSAGE') => {
       knownMessageIdsRef.current.add(msg.id);
 
-      // A. Send over WebSocket if connected
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         try {
           wsRef.current.send(
             JSON.stringify({
-              type: 'NEW_MESSAGE',
+              type: eventType,
               issue_id: issueId,
               message: msg
             })
           );
-        } catch { }
+        } catch {
+          // ignore
+        }
       }
 
-      // B. Broadcast to other tabs via BroadcastChannel
       if (broadcastChannelRef.current) {
         try {
           broadcastChannelRef.current.postMessage({
-            type: 'NEW_MESSAGE',
+            type: eventType,
             issueId,
             message: msg
           });
-        } catch { }
+        } catch {
+          // ignore
+        }
       }
 
-      // C. Fallback via localStorage event
       try {
         localStorage.setItem(
           `resolvehub_ws_msg_${issueId}`,
-          JSON.stringify({ message: msg, time: Date.now() })
+          JSON.stringify({ type: eventType, message: msg, time: Date.now() })
         );
-      } catch { }
+      } catch {
+        // ignore
+      }
     },
     [issueId]
   );
 
   return {
     isConnected,
-    syncMode,
     broadcastMessage
   };
 }

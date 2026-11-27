@@ -20,8 +20,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_STORAGE_KEY = 'resolvehub_auth_user';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const isMock = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
-
   // Pure dynamic session: Requires both stored user and valid auth token
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
@@ -29,8 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = localStorage.getItem(AUTH_STORAGE_KEY);
       if (!saved) return null;
 
-      // In real backend mode, verify token exists and is valid
-      if (!isMock && (!token || !isTokenValid(token))) {
+      if (!token || !isTokenValid(token)) {
         localStorage.removeItem(AUTH_STORAGE_KEY);
         localStorage.removeItem('resolvehub_auth_token');
         return null;
@@ -58,55 +55,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     identifier: string,
     password?: string
   ): Promise<{ success: boolean; message?: string; user?: User }> => {
-    const isMock = import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
+    const apiResult = await apiLogin(role, identifier, password);
 
-    // 1. Authenticate via real Backend API (Authorization is handled directly by the backend)
-    if (!isMock) {
-      const apiResult = await apiLogin(role, identifier, password);
-
-      if (!apiResult.success || !apiResult.user) {
-        return {
-          success: false,
-          message: apiResult.message || 'Invalid credentials. Please verify your Email/Employee ID and Password.'
-        };
-      }
-
-      const returnedUser = apiResult.user;
-
-      // Authenticated session accepted from backend
-      setCurrentUser(returnedUser);
-      setSelectedRole(returnedUser.role);
-      return { success: true, user: returnedUser };
+    if (!apiResult.success || !apiResult.user) {
+      return {
+        success: false,
+        message: apiResult.message || 'Invalid credentials. Please verify your Email/Employee ID and Password.'
+      };
     }
 
-    // 2. Mock mode: Only available if user explicitly turns on mock in .env
-    return {
-      success: false,
-      message: 'Mock data has been disabled. Please connect to the backend server.'
-    };
+    const returnedUser = apiResult.user;
+    setCurrentUser(returnedUser);
+    setSelectedRole(returnedUser.role);
+    return { success: true, user: returnedUser };
   };
 
   const signup = async (
     data: SignupFormData
   ): Promise<{ success: boolean; message?: string }> => {
-    const isMock = import.meta.env.VITE_ENABLE_MOCK_DATA === 'true';
-
-    if (!isMock) {
-      const apiResult = await apiSignup(data);
-      if (apiResult.success) {
-        // Clear any auto-stored token so the user explicitly logs in on the login page
-        localStorage.removeItem('resolvehub_auth_token');
-        return { success: true };
-      }
-      return {
-        success: false,
-        message: apiResult.message || 'Registration failed on backend server.'
-      };
+    const apiResult = await apiSignup(data);
+    if (apiResult.success) {
+      // Clear any auto-stored token so the user explicitly logs in on the login page
+      localStorage.removeItem('resolvehub_auth_token');
+      return { success: true };
     }
-
     return {
       success: false,
-      message: 'Mock data has been disabled.'
+      message: apiResult.message || 'Registration failed on backend server.'
     };
   };
 
@@ -140,8 +115,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             prev.id === newUser.id &&
             prev.employeeId === newUser.employeeId &&
             prev.role === newUser.role &&
+            prev.roleType === newUser.roleType &&
             prev.name === newUser.name &&
-            prev.email === newUser.email
+            prev.email === newUser.email &&
+            prev.accountStatus === newUser.accountStatus
           ) {
             return prev;
           }
@@ -164,7 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         updateProfile,
         refreshProfile,
-        isAuthenticated: !!currentUser && (isMock || isTokenValid(getAuthToken()))
+        isAuthenticated: !!currentUser && isTokenValid(getAuthToken())
       }}
     >
       {children}

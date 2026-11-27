@@ -65,10 +65,11 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
   const [developers, setDevelopers] = useState<DeveloperItem[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isLoadingDevelopers, setIsLoadingDevelopers] = useState(false);
+  const [optionsError, setOptionsError] = useState<string>('');
 
   // Form Fields matching user's exact requirements:
   // 1. Project
-  const [projectId, setProjectId] = useState<string>('Nokia Production Dashboard');
+  const [projectId, setProjectId] = useState<string>('');
   // 2. Shift (Shift-A, Shift-B, Shift-C, General)
   const [shift, setShift] = useState<string>(getDefaultShift);
   // 3. Issue Occurrence time (calendar with time)
@@ -100,6 +101,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
     async function loadOptions() {
       setIsLoadingProjects(true);
       setIsLoadingDevelopers(true);
+      setOptionsError('');
 
       const isDev = String(currentUser?.role || '').toLowerCase().includes('dev');
       const targetRole = isDev ? 'supporter' : 'developer';
@@ -110,16 +112,27 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
       ]);
 
       if (isMounted) {
-        if (projRes.data && projRes.data.length > 0) {
+        const errs: string[] = [];
+        if (projRes.success && projRes.data.length > 0) {
           setProjects(projRes.data);
-          setProjectId(String(projRes.data[0].id || projRes.data[0].name));
+          setProjectId((prev) => prev || String(projRes.data[0].id || projRes.data[0].name));
+        } else {
+          setProjects([]);
+          if (!projRes.success) errs.push(projRes.message || 'Failed to load projects.');
         }
         setIsLoadingProjects(false);
 
-        if (devRes.data && devRes.data.length > 0) {
+        if (devRes.success && devRes.data.length > 0) {
           setDevelopers(devRes.data);
+        } else {
+          setDevelopers([]);
+          if (!devRes.success) errs.push(devRes.message || 'Failed to load assignees.');
         }
         setIsLoadingDevelopers(false);
+
+        if (errs.length > 0) {
+          setOptionsError(errs.join(' '));
+        }
       }
     }
 
@@ -128,7 +141,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [currentUser?.role]);
 
   const handleDeveloperChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -237,7 +250,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
               <div>
                 <h5 className="modal-title fw-bold text-navy fs-6 mb-0">Report Technical Incident</h5>
                 <small className="text-secondary">
-                  Logged by: <strong className="text-navy">{currentUser?.name || 'Supporter'}</strong> ({currentUser?.employeeId || 'EMP'})
+                  Logged by: <strong className="text-navy">{currentUser?.name || '—'}</strong> ({currentUser?.employeeId || '—'})
                 </small>
               </div>
             </div>
@@ -254,10 +267,10 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
           <form onSubmit={handleSubmit} noValidate>
             <div className="modal-body p-4 bg-white" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
               
-              {submitError && (
+              {(submitError || optionsError) && (
                 <div className="alert alert-danger py-2 px-3 small rounded-3 d-flex align-items-center mb-3">
                   <i className="bi bi-exclamation-triangle-fill me-2 fs-6"></i>
-                  <span>{submitError}</span>
+                  <span>{submitError || optionsError}</span>
                 </div>
               )}
 
@@ -281,7 +294,9 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ onClose, onS
                     className={`form-select form-select-sm ${errors.projectId ? 'is-invalid' : ''}`}
                     value={projectId}
                     onChange={(e) => setProjectId(e.target.value)}
+                    disabled={isLoadingProjects}
                   >
+                    <option value="">{isLoadingProjects ? 'Loading projects...' : '-- Select Project --'}</option>
                     {projects.map((p) => (
                       <option key={String(p.id)} value={String(p.id || p.name)}>
                         {p.name}

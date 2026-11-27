@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './apiClient';
+import { API_BASE_URL, getAuthHeaders } from './apiClient';
 
 export interface DashboardSummary {
   totalLogged: number;
@@ -70,15 +70,6 @@ export interface DeveloperPriorityDistributionResponse {
   medium: number[];
   low: number[];
   stats?: DeveloperPriorityStats;
-}
-
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('resolvehub_auth_token');
-  return {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
 }
 
 /**
@@ -297,9 +288,7 @@ export async function apiFetchSupportIssueTrends(): Promise<{
     return {
       success: true,
       data: {
-        labels: Array.isArray(payload.labels) && payload.labels.length > 0
-          ? payload.labels
-          : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        labels: Array.isArray(payload.labels) ? payload.labels : [],
         open_tickets: Array.isArray(payload.open_tickets) ? payload.open_tickets.map(Number) : [],
         resolved_tickets: Array.isArray(payload.resolved_tickets) ? payload.resolved_tickets.map(Number) : [],
         on_hold_tickets: Array.isArray(payload.on_hold_tickets)
@@ -367,9 +356,7 @@ export async function apiFetchSupportIssueTypeDistribution(): Promise<{
     return {
       success: true,
       data: {
-        labels: Array.isArray(payload.labels) && payload.labels.length > 0
-          ? payload.labels
-          : ['Front-end', 'Backend', 'Database', 'Others'],
+        labels: Array.isArray(payload.labels) ? payload.labels : [],
         counts: Array.isArray(payload.counts) ? payload.counts.map(Number) : [],
         stats: payload.stats || undefined
       }
@@ -419,9 +406,7 @@ export async function apiFetchDeveloperIssueTrends(): Promise<{
     return {
       success: true,
       data: {
-        labels: Array.isArray(payload.labels) && payload.labels.length > 0
-          ? payload.labels
-          : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        labels: Array.isArray(payload.labels) ? payload.labels : [],
         open_tickets: Array.isArray(payload.open_tickets) ? payload.open_tickets.map(Number) : [],
         resolved_tickets: Array.isArray(payload.resolved_tickets) ? payload.resolved_tickets.map(Number) : [],
         on_hold_tickets: Array.isArray(payload.on_hold_tickets)
@@ -476,9 +461,7 @@ export async function apiFetchDeveloperPriorityDistribution(): Promise<{
     return {
       success: true,
       data: {
-        labels: Array.isArray(payload.labels) && payload.labels.length > 0
-          ? payload.labels
-          : ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+        labels: Array.isArray(payload.labels) ? payload.labels : [],
         high: Array.isArray(payload.high) ? payload.high.map(Number) : [],
         medium: Array.isArray(payload.medium) ? payload.medium.map(Number) : [],
         low: Array.isArray(payload.low) ? payload.low.map(Number) : [],

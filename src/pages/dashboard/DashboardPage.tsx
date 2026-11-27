@@ -18,10 +18,15 @@ export interface DashboardPageProps {
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ role }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, refreshProfile } = useAuth();
   const effectiveRole = role || resolveRoleKey(currentUser?.role);
   const isDeveloper = effectiveRole === 'Developer';
   const roleConfig = getRoleConfig(effectiveRole);
+
+  // Refresh authenticated user profile via /auth/me on Home page mount
+  useEffect(() => {
+    refreshProfile().catch(() => {});
+  }, [refreshProfile]);
 
   const [summaryData, setSummaryData] = useState<DashboardSummary | DeveloperDashboardSummary | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -40,6 +45,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ role }) => {
         if (res.success && res.data) {
           setSummaryData(res.data);
         } else {
+          setSummaryData(null);
           setApiError(res.message || 'Failed to fetch Developer summary');
         }
       } else {
@@ -47,10 +53,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ role }) => {
         if (res.success && res.data) {
           setSummaryData(res.data);
         } else {
+          setSummaryData(null);
           setApiError(res.message || 'Failed to fetch Support summary');
         }
       }
     } catch (err: any) {
+      setSummaryData(null);
       setApiError(err.message || 'Network error fetching KPIs');
     } finally {
       setIsLoading(false);
@@ -62,13 +70,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ role }) => {
     loadSummary();
   }, [loadSummary]);
 
-  // 2. Real-Time SSE Listener (Server-Sent Events)
+  // 2. Real-Time Server-Sent Events (SSE) Listener
   const handleDashboardUpdate = useCallback(() => {
     loadSummary();
     setRefreshKey((prev) => prev + 1);
   }, [loadSummary]);
 
-  const { isConnected } = useDashboardSSE(handleDashboardUpdate);
+  const { isConnected, connectionState, error: sseError } = useDashboardSSE(handleDashboardUpdate);
 
   const handleIssueCreated = () => {
     setIsReportModalOpen(false);
@@ -78,91 +86,98 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ role }) => {
     setTimeout(() => setSuccessToast(null), 4000);
   };
 
-  // Build the 4 KPI cards matching the role configuration
+  // Build the 4 KPI cards matching the role configuration (never display fake 0s when unavailable)
+  const devSummary = summaryData as DeveloperDashboardSummary | null;
+  const supSummary = summaryData as DashboardSummary | null;
+
   const kpiCards: KpiCardData[] = isDeveloper
     ? [
-        {
-          config: roleConfig.kpis.card1,
-          value: summaryData ? (summaryData as DeveloperDashboardSummary).totalIssues : 0,
-          hint: 'Total issues',
-          icon: 'bi-stack',
-          iconBg: 'rgba(13, 110, 253, 0.1)',
-          iconColor: '#0D6EFD'
-        },
-        {
-          config: roleConfig.kpis.card2,
-          value: summaryData ? (summaryData as DeveloperDashboardSummary).assignedIssues : 0,
-          hint: 'Assigned to me',
-          icon: 'bi-person-check',
-          iconBg: 'rgba(16, 185, 129, 0.1)',
-          iconColor: '#10B981'
-        },
-        {
-          config: roleConfig.kpis.card3,
-          value: summaryData ? (summaryData as DeveloperDashboardSummary).inProgressCount : 0,
-          hint: 'Currently working',
-          icon: 'bi-hourglass-split',
-          iconBg: '#F3E8FF',
-          iconColor: '#8B5CF6',
-          valueColor: '#8B5CF6'
-        },
-        {
-          config: roleConfig.kpis.card4,
-          value: summaryData ? (summaryData as DeveloperDashboardSummary).pendingCount : 0,
-          hint: 'Awaiting action',
-          icon: 'bi-ticket-perforated',
-          iconBg: '#FEF3C7',
-          iconColor: '#D97706'
-        }
-      ]
+      {
+        config: roleConfig.kpis.card1,
+        value: devSummary ? devSummary.totalIssues : '—',
+        hint: 'Total issues',
+        icon: 'bi-stack',
+        iconBg: 'rgba(13, 110, 253, 0.1)',
+        iconColor: '#0D6EFD'
+      },
+      {
+        config: roleConfig.kpis.card2,
+        value: devSummary ? devSummary.assignedIssues : '—',
+        hint: 'Assigned to me',
+        icon: 'bi-person-check',
+        iconBg: 'rgba(16, 185, 129, 0.1)',
+        iconColor: '#10B981'
+      },
+      {
+        config: roleConfig.kpis.card3,
+        value: devSummary ? devSummary.inProgressCount : '—',
+        hint: 'Currently working',
+        icon: 'bi-hourglass-split',
+        iconBg: '#F3E8FF',
+        iconColor: '#8B5CF6',
+        valueColor: '#8B5CF6'
+      },
+      {
+        config: roleConfig.kpis.card4,
+        value: devSummary ? devSummary.pendingCount : '—',
+        hint: 'Awaiting action',
+        icon: 'bi-ticket-perforated',
+        iconBg: '#FEF3C7',
+        iconColor: '#D97706'
+      }
+    ]
     : [
-        {
-          config: roleConfig.kpis.card1,
-          value: summaryData ? (summaryData as DashboardSummary).totalLogged : 0,
-          hint: 'All time logged',
-          icon: 'bi-stack',
-          iconBg: 'rgba(13, 110, 253, 0.1)',
-          iconColor: '#0D6EFD'
-        },
-        {
-          config: roleConfig.kpis.card2,
-          value: (
-            <>
-              <span className="text-primary">{summaryData ? (summaryData as DashboardSummary).activeCount : 0}</span>
-              <span className="text-muted fs-6 fw-normal mx-1">/</span>
-              <span className="text-success">{summaryData ? (summaryData as DashboardSummary).resolvedCount : 0}</span>
-            </>
-          ),
-          hint: `${summaryData ? (summaryData as DashboardSummary).resolvedCount : 0} closed`,
-          icon: 'bi-check-circle',
-          iconBg: 'rgba(16, 185, 129, 0.1)',
-          iconColor: '#10B981'
-        },
-        {
-          config: roleConfig.kpis.card3,
-          value: summaryData ? (summaryData as DashboardSummary).inProgressCount : 0,
-          hint: 'Developer triage',
-          icon: 'bi-hourglass-split',
-          iconBg: '#F3E8FF',
-          iconColor: '#8B5CF6',
-          valueColor: '#8B5CF6'
-        },
-        {
-          config: roleConfig.kpis.card4,
-          value: (
-            <>
-              <span className="text-warning">{summaryData ? (summaryData as DashboardSummary).openCount : 0}</span>
-              <span className="text-muted fs-6 fw-normal ms-1">
-                ({summaryData ? (summaryData as DashboardSummary).acceptedCount : 0} Acc.)
-              </span>
-            </>
-          ),
-          hint: 'Queue allocation',
-          icon: 'bi-ticket-perforated',
-          iconBg: '#FEF3C7',
-          iconColor: '#D97706'
-        }
-      ];
+      {
+        config: roleConfig.kpis.card1,
+        value: supSummary ? supSummary.totalLogged : '—',
+        hint: 'All time logged',
+        icon: 'bi-stack',
+        iconBg: 'rgba(13, 110, 253, 0.1)',
+        iconColor: '#0D6EFD'
+      },
+      {
+        config: roleConfig.kpis.card2,
+        value: supSummary ? (
+          <>
+            <span className="text-primary">{supSummary.activeCount}</span>
+            <span className="text-muted fs-6 fw-normal mx-1">/</span>
+            <span className="text-success">{supSummary.resolvedCount}</span>
+          </>
+        ) : (
+          '—'
+        ),
+        hint: supSummary ? `${supSummary.resolvedCount} closed` : 'Awaiting metrics',
+        icon: 'bi-check-circle',
+        iconBg: 'rgba(16, 185, 129, 0.1)',
+        iconColor: '#10B981'
+      },
+      {
+        config: roleConfig.kpis.card3,
+        value: supSummary ? supSummary.inProgressCount : '—',
+        hint: 'Developer triage',
+        icon: 'bi-hourglass-split',
+        iconBg: '#F3E8FF',
+        iconColor: '#8B5CF6',
+        valueColor: '#8B5CF6'
+      },
+      {
+        config: roleConfig.kpis.card4,
+        value: supSummary ? (
+          <>
+            <span className="text-warning">{supSummary.openCount}</span>
+            <span className="text-muted fs-6 fw-normal ms-1">
+              ({supSummary.acceptedCount} Acc.)
+            </span>
+          </>
+        ) : (
+          '—'
+        ),
+        hint: 'Queue allocation',
+        icon: 'bi-ticket-perforated',
+        iconBg: '#FEF3C7',
+        iconColor: '#D97706'
+      }
+    ];
 
   return (
     <div className="d-flex flex-column h-100 overflow-hidden" style={{ gap: '0.85rem' }}>
@@ -184,6 +199,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ role }) => {
         roleType={currentUser?.roleType}
         isDeveloper={isDeveloper}
         isConnected={isConnected}
+        connectionState={connectionState}
+        sseError={sseError}
         subtitle={roleConfig.dashboardSubtitle}
         onRefresh={loadSummary}
         onCreateIssue={() => setIsReportModalOpen(true)}

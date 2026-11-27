@@ -7,16 +7,18 @@ export interface IssueTableProps {
   isLoading: boolean;
   onRowClick: (issue: Issue) => void;
   emptyMessage?: string;
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
 }
 
 export const IssueTable: React.FC<IssueTableProps> = ({
   issues,
   isLoading,
   onRowClick,
-  emptyMessage = 'No issues found matching your selected filters.'
+  emptyMessage = 'No issues found matching your selected filters.',
+  scrollContainerRef
 }) => {
   return (
-    <div className="table-scroll-area">
+    <div className="table-scroll-area" ref={scrollContainerRef}>
       <table className="table table-hover align-middle mb-0">
         <thead className="table-light sticky-top" style={{ zIndex: 1 }}>
           <tr className="small text-muted text-uppercase" style={{ fontSize: '0.72rem', letterSpacing: '0.4px' }}>
@@ -55,7 +57,7 @@ export const IssueTable: React.FC<IssueTableProps> = ({
                     : ((issue.projectName as any)?.project_name ||
                       (issue.projectId as any)?.project_name ||
                       (issue.projectName as any)?.name ||
-                      'General Project');
+                      '—');
 
               return (
                 <tr
@@ -75,7 +77,7 @@ export const IssueTable: React.FC<IssueTableProps> = ({
                   </td>
                   <td>
                     <span className="badge bg-light text-navy border small">
-                      {issue.issueType || 'General'}
+                      {issue.issueType || '—'}
                     </span>
                   </td>
                   <td>
@@ -87,11 +89,11 @@ export const IssueTable: React.FC<IssueTableProps> = ({
                     )}
                   </td>
                   <td className="small text-secondary">
-                    {issue.reportedDate || issue.resolvedDate || '-'}
+                    {issue.reportedDate || issue.resolvedDate || '—'}
                   </td>
                   <td>
                     <span className="badge bg-primary-subtle text-primary border border-primary-subtle small">
-                      {issue.shift || 'Shift-A'}
+                      {issue.shift || '—'}
                     </span>
                   </td>
                 </tr>

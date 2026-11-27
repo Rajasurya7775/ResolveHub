@@ -70,26 +70,17 @@ export const IssueTableFilters: React.FC<IssueTableFiltersProps> = ({
             onChange={(e) => onProjectChange(e.target.value)}
           >
             <option value="All">All Projects</option>
-            {projectOptions.length > 0 ? (
-              projectOptions.map((proj) => {
-                const projName =
-                  typeof proj === 'string'
-                    ? proj
-                    : (proj as any)?.project_name || (proj as any)?.name || String(proj);
-                return (
-                  <option key={projName} value={projName}>
-                    {projName}
-                  </option>
-                );
-              })
-            ) : (
-              <>
-                <option value="Nokia Production Dashboard">Nokia Production</option>
-                <option value="Manufacturing Analytics">Manufacturing</option>
-                <option value="Inventory Monitoring">Inventory</option>
-                <option value="Network Monitoring">Network</option>
-              </>
-            )}
+            {projectOptions.map((proj) => {
+              const projName =
+                typeof proj === 'string'
+                  ? proj
+                  : (proj as any)?.project_name || (proj as any)?.name || String(proj);
+              return (
+                <option key={projName} value={projName}>
+                  {projName}
+                </option>
+              );
+            })}
           </select>
         </div>
 
