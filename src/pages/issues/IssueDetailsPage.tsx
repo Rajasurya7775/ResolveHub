@@ -12,6 +12,7 @@ import {
   apiFetchDevelopers
 } from '../../services/api/issueService';
 import { useIssueMessagesWebSocket } from '../../hooks/useIssueMessagesWebSocket';
+import { IssueAuditLogs } from '../../components/issues/IssueAuditLogs';
 import {
   IssueCollaborationThread,
   isWithinEditWindow
@@ -150,6 +151,7 @@ export const IssueDetailsPage: React.FC = () => {
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState<string>('');
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
   const [isSending, setIsSending] = useState<boolean>(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -357,6 +359,11 @@ export const IssueDetailsPage: React.FC = () => {
       }
     }
   });
+
+  // Scroll chat to bottom when messages update
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, showAuditLogs]);
 
   const handleBack = () => {
     const historyIdx = typeof window !== 'undefined' ? (window.history.state as { idx?: number } | null)?.idx : undefined;
@@ -1394,6 +1401,342 @@ export const IssueDetailsPage: React.FC = () => {
 
           {/* ================= RIGHT COLUMN (~41%): INCIDENT COLLABORATION THREAD ================= */}
           <div className="col-12 col-lg-5 d-flex flex-column details-column h-100 min-h-0">
+            <div className="card border-0 shadow-sm rounded-3 bg-white h-100 d-flex flex-column overflow-hidden">
+              <div className="nav nav-tabs nav-fill bg-light flex-shrink-0" role="group" aria-label="Issue activity">
+                <button
+                  type="button"
+                  className={`nav-link small ${showAuditLogs ? 'text-secondary' : 'active text-primary'}`}
+                  aria-pressed={!showAuditLogs}
+                  aria-controls="issue-messages"
+                  onClick={() => setShowAuditLogs(false)}
+                >
+                  <i className="bi bi-chat-dots me-1" aria-hidden="true"></i>
+                  Messages
+                </button>
+                <button
+                  type="button"
+                  className={`nav-link small ${showAuditLogs ? 'active text-primary' : 'text-secondary'}`}
+                  aria-pressed={showAuditLogs}
+                  aria-controls="issue-audit-panel"
+                  onClick={() => setShowAuditLogs(true)}
+                >
+                  <i className="bi bi-clock-history me-1" aria-hidden="true"></i>
+                  Audit Logs
+                </button>
+              </div>
+
+              <div id="issue-audit-panel" className={showAuditLogs ? 'd-flex flex-column flex-grow-1 min-h-0' : 'd-none'}>
+                {showAuditLogs && <IssueAuditLogs key={`${sourceHint}:${issue.id}`} issueId={issue.id} scope={sourceHint} />}
+              </div>
+              <div id="issue-messages" style={{ display: showAuditLogs ? 'none' : 'contents' }}>
+              {/* Thread Header */}
+              <div className="p-3 border-bottom d-flex align-items-center justify-content-between bg-white flex-shrink-0">
+                <div className="d-flex align-items-center gap-2.5">
+                  <i className="bi bi-chat-dots-fill text-primary fs-5"></i>
+                  <div>
+                    <h6 className="fw-bold text-navy mb-0" style={{ fontSize: '0.95rem' }}>
+                      Incident Collaboration Thread
+                    </h6>
+                    <small className="text-muted" style={{ fontSize: '0.75rem' }}>
+                      2-way Sync between Supporters and Developers
+                    </small>
+                  </div>
+                </div>
+
+                <div className="d-flex align-items-center gap-2">
+                  <span
+                    className="badge rounded-pill px-3 py-1.5 fw-medium"
+                    style={{
+                      backgroundColor: '#eef2f6',
+                      color: '#334155',
+                      border: '1px solid #e2e8f0',
+                      fontSize: '0.78rem'
+                    }}
+                  >
+                    {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Scrollable Message List / Empty State */}
+              <div className="p-3.5 overflow-y-auto flex-grow-1 d-flex flex-column gap-3.5 bg-white">
+                {messages.length === 0 ? (
+                  <div className="my-auto text-center py-5 px-3">
+                    {/* Two-bubble illustration matching reference */}
+                    <svg
+                      width="92"
+                      height="74"
+                      viewBox="0 0 100 80"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="mb-3"
+                    >
+                      {/* Left Sky Blue Bubble */}
+                      <path
+                        d="M15 15C15 9.47715 19.4772 5 25 5H55C60.5228 5 65 9.47715 65 15V35C65 40.5228 60.5228 45 55 45H32L20 54V45H25C19.4772 45 15 40.5228 15 35V15Z"
+                        fill="#93C5FD"
+                      />
+                      <rect x="25" y="17" width="28" height="3.5" rx="1.75" fill="white" />
+                      <rect x="25" y="25" width="20" height="3.5" rx="1.75" fill="white" />
+                      {/* Right Powder Blue Bubble */}
+                      <path
+                        d="M42 32C42 26.4772 46.4772 22 52 22H78C83.5228 22 88 26.4772 88 32V50C88 55.5228 83.5228 60 78 60H75V67L64 60H52C46.4772 60 42 55.5228 42 50V32Z"
+                        fill="#BFDBFE"
+                      />
+                      <rect x="52" y="34" width="26" height="3.5" rx="1.75" fill="white" />
+                      <rect x="52" y="42" width="18" height="3.5" rx="1.75" fill="white" />
+                      {/* Accent Sparkles */}
+                      <circle cx="82" cy="14" r="2.5" fill="#60A5FA" />
+                      <circle cx="88" cy="18" r="1.5" fill="#93C5FD" />
+                    </svg>
+
+                    <h6 className="fw-bold text-navy mb-1" style={{ fontSize: '0.95rem' }}>
+                      No messages yet in this discussion.
+                    </h6>
+                    <p className="text-muted small mb-0" style={{ fontSize: '0.8rem' }}>
+                      Start the collaboration by sending a message below.
+                    </p>
+                  </div>
+                ) : (
+                  messages.map((msg) => {
+                    const isSenderMsg = checkIsSender(msg);
+                    const isDeveloper =
+                      msg.senderRole?.toLowerCase().includes('dev') ||
+                      msg.senderName?.toLowerCase().includes('jeva') ||
+                      msg.senderName?.toLowerCase().includes('arun');
+
+                    const avatarLetter = (msg.senderName || 'U').charAt(0).toUpperCase();
+                    const isCurrentlyEditing = editingMessageId === msg.id;
+                    const isEditable = isSenderMsg && isWithin15Minutes(msg.createdAt);
+                    const remainingMins = getRemainingEditMinutes(msg.createdAt);
+
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`d-flex ${isSenderMsg ? 'justify-content-end' : 'justify-content-start'} w-100 mb-3`}
+                      >
+                        <div
+                          className={`d-flex align-items-start gap-2.5 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}
+                          style={{ maxWidth: '85%' }}
+                        >
+                          {/* Avatar */}
+                          <div
+                            className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold shadow-2xs flex-shrink-0"
+                            style={{
+                              width: '38px',
+                              height: '38px',
+                              fontSize: '0.95rem',
+                              backgroundColor: isSenderMsg ? '#0d6efd' : (isDeveloper ? '#8b5cf6' : '#0284c7')
+                            }}
+                          >
+                            {avatarLetter}
+                          </div>
+
+                          {/* Content on Left / Right */}
+                          <div className={`d-flex flex-column ${isSenderMsg ? 'align-items-end' : 'align-items-start'} min-w-0 flex-grow-1`}>
+                            {/* Top Meta Line: Sender Name + Role Badge + Timestamp */}
+                            <div className={`d-flex align-items-center gap-2 mb-1.5 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}>
+                              <span className="fw-bold text-navy" style={{ fontSize: '0.9rem' }}>
+                                {isSenderMsg ? `${msg.senderName} (You)` : msg.senderName}
+                              </span>
+                              <span
+                                className="badge rounded-pill px-2.5 py-0.5 fw-semibold"
+                                style={{
+                                  fontSize: '0.72rem',
+                                  backgroundColor: isDeveloper ? '#f3e8ff' : '#dbeafe',
+                                  color: isDeveloper ? '#7c3aed' : '#2563eb'
+                                }}
+                              >
+                                {isDeveloper ? 'Developer' : 'Supporter'}
+                              </span>
+                              <span className="text-secondary small" style={{ fontSize: '0.75rem' }}>
+                                {msg.timestamp}
+                                {msg.isEdited && <span className="ms-1 text-muted fst-italic">(edited)</span>}
+                              </span>
+                            </div>
+
+                            {/* Message Bubble Container */}
+                            <div
+                              className="rounded-3 p-3 shadow-2xs position-relative"
+                              style={{
+                                backgroundColor: isSenderMsg ? '#0d6efd' : (isDeveloper ? '#faf5ff' : '#eff6ff'),
+                                color: isSenderMsg ? '#ffffff' : '#1e293b',
+                                border: isSenderMsg ? '1px solid #0d6efd' : `1px solid ${isDeveloper ? '#f3e8ff' : '#dbeafe'}`,
+                                fontSize: '0.88rem',
+                                lineHeight: 1.45,
+                                wordBreak: 'break-word',
+                                whiteSpace: 'pre-line',
+                                borderTopRightRadius: isSenderMsg ? '4px' : '14px',
+                                borderTopLeftRadius: !isSenderMsg ? '4px' : '14px',
+                                borderBottomLeftRadius: '14px',
+                                borderBottomRightRadius: '14px',
+                                minWidth: '180px'
+                              }}
+                            >
+                              {isCurrentlyEditing ? (
+                                /* Inline Editing UI */
+                                <div className="w-100" style={{ minWidth: '240px' }}>
+                                  <div className="d-flex align-items-center justify-content-between mb-1.5">
+                                    <span className="fw-semibold small" style={{ color: isSenderMsg ? '#ffffff' : '#1e293b', fontSize: '0.78rem' }}>
+                                      <i className="bi bi-pencil me-1"></i> Edit Message
+                                    </span>
+                                    <span className="badge rounded-pill bg-white text-primary px-2 py-0.5 fw-semibold" style={{ fontSize: '0.7rem' }}>
+                                      {remainingMins}m left
+                                    </span>
+                                  </div>
+
+                                  <textarea
+                                    className="form-control form-control-sm mb-2 shadow-sm text-navy"
+                                    rows={3}
+                                    value={editingText}
+                                    onChange={(e) => setEditingText(e.target.value)}
+                                    style={{
+                                      fontSize: '0.88rem',
+                                      backgroundColor: '#ffffff',
+                                      color: '#0f172a',
+                                      border: '1px solid #cbd5e1'
+                                    }}
+                                    autoFocus
+                                  />
+
+                                  {editMessageError && (
+                                    <div className="alert alert-danger py-1 px-2 small mb-2" style={{ fontSize: '0.75rem' }}>
+                                      {editMessageError}
+                                    </div>
+                                  )}
+
+                                  <div className="d-flex align-items-center justify-content-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-light py-1 px-2.5 fw-medium"
+                                      style={{ fontSize: '0.78rem' }}
+                                      onClick={handleCancelEdit}
+                                      disabled={isSavingEdit}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-warning py-1 px-3 fw-bold d-inline-flex align-items-center gap-1 shadow-sm text-dark"
+                                      style={{ fontSize: '0.78rem' }}
+                                      onClick={() => handleSaveMessageEdit(msg.id)}
+                                      disabled={!editingText.trim() || isSavingEdit}
+                                    >
+                                      {isSavingEdit ? (
+                                        <span className="spinner-border spinner-border-sm" role="status"></span>
+                                      ) : (
+                                        <>
+                                          <i className="bi bi-check-lg"></i> Save Changes
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div>{msg.markdown || msg.message}</div>
+
+                                  {/* Attached file capsule if present */}
+                                  {msg.attachment && (
+                                    <div className="mt-2.5">
+                                      <div
+                                        className="d-inline-flex align-items-center gap-2 px-3 py-1.5 rounded-pill bg-white border shadow-2xs text-navy"
+                                        style={{ borderColor: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
+                                        title="Download attachment"
+                                      >
+                                        <i className="bi bi-paperclip text-secondary"></i>
+                                        <span className="fw-medium text-navy">{msg.attachment.name}</span>
+                                        {msg.attachment.size && <span className="text-muted">({msg.attachment.size})</span>}
+                                        <i className="bi bi-download text-secondary ms-1"></i>
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            {/* Meta Actions Below Bubble: 15-Minute Edit & Reactions */}
+                            <div className={`d-flex align-items-center gap-2 mt-1 ${isSenderMsg ? 'flex-row-reverse' : 'flex-row'}`}>
+                              {/* 15-Minute Edit Button: Available only for Sender within 15 mins */}
+                              {isSenderMsg && isEditable && !isCurrentlyEditing && (
+                                <button
+                                  type="button"
+                                  className="btn btn-link btn-sm text-primary p-0 text-decoration-none d-inline-flex align-items-center gap-1 fw-semibold"
+                                  style={{ fontSize: '0.75rem' }}
+                                  onClick={() => handleStartEdit(msg)}
+                                  title={`Edit message (${remainingMins}m remaining in the 15-min edit window)`}
+                                >
+                                  <i className="bi bi-pencil-square"></i>
+                                  <span>Edit</span>
+                                  <span className="text-muted fw-normal" style={{ fontSize: '0.7rem' }}>({remainingMins}m left)</span>
+                                </button>
+                              )}
+
+                              {/* Reaction badge below bubble if present */}
+                              {msg.reaction && (
+                                <div
+                                  className="d-inline-flex align-items-center gap-1 px-2.5 py-0.5 rounded-pill bg-white border shadow-2xs"
+                                  style={{ borderColor: '#e2e8f0', fontSize: '0.75rem', backgroundColor: '#ffffff' }}
+                                >
+                                  <span>{msg.reaction}</span>
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={chatBottomRef} />
+              </div>
+
+              {/* Message Composer Box matching reference pill style */}
+              <div className="p-3 bg-white border-top flex-shrink-0">
+                <form onSubmit={handleSendMessage}>
+                  <div
+                    className="d-flex align-items-center gap-2 rounded-pill p-1.5 ps-2 bg-white"
+                    style={{ border: '1px solid #cbd5e1' }}
+                  >
+                    <button
+                      type="button"
+                      className="btn rounded-circle p-0 d-flex align-items-center justify-content-center flex-shrink-0 border-0"
+                      style={{ width: '34px', height: '34px', backgroundColor: '#eef2f6', color: '#64748b' }}
+                      title="Attach file"
+                    >
+                      <i className="bi bi-paperclip fs-5"></i>
+                    </button>
+
+                    <input
+                      type="text"
+                      className="form-control border-0 bg-transparent shadow-none px-2 small text-navy"
+                      placeholder="Type a message to collaborate with engineers..."
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      disabled={isSending}
+                      style={{ fontSize: '0.86rem' }}
+                    />
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary rounded-circle d-flex align-items-center justify-content-center p-0 flex-shrink-0 border-0 shadow-sm"
+                      style={{ width: '36px', height: '36px', backgroundColor: '#0d6efd' }}
+                      disabled={!messageText.trim() || isSending}
+                      title="Send message"
+                    >
+                      {isSending ? (
+                        <span className="spinner-border spinner-border-sm text-white" role="status"></span>
+                      ) : (
+                        <i className="bi bi-send-fill text-white" style={{ fontSize: '0.9rem', marginLeft: '1px' }}></i>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              </div>
+            </div>
             <IssueCollaborationThread
               messages={messages}
               currentUser={currentUser}
